@@ -1,0 +1,56 @@
+name: YouTube Scraper
+
+on:
+  workflow_dispatch:
+    inputs:
+      limit:
+        description: "Optional max videos per channel"
+        required: false
+        type: string
+  schedule:
+    - cron: "0 * * * *"
+
+jobs:
+  scrape:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      YT_API_KEY: ${{ secrets.YT_API_KEY }}
+      SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+      SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+      SCRAPER_LIMIT: ${{ inputs.limit }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: python -m pip install --upgrade pip requests
+
+      - name: Validate required secrets
+        run: |
+          test -n "$YT_API_KEY"
+          test -n "$SUPABASE_URL"
+          test -n "$SUPABASE_SERVICE_ROLE_KEY"
+
+      - name: Run scraper
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -n "${SCRAPER_LIMIT:-}" ]; then
+            python youtube_channel_scraper.py --limit "$SCRAPER_LIMIT" --output latest_run.json
+          else
+            python youtube_channel_scraper.py --output latest_run.json
+          fi
+
+      - name: Upload latest run artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: latest-run-json
+          path: latest_run.json
+          if-no-files-found: ignore
