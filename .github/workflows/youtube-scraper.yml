@@ -7,8 +7,6 @@ on:
         description: "Optional max videos per channel"
         required: false
         type: string
-  schedule:
-    - cron: "0 * * * *"
 
 jobs:
   scrape:
