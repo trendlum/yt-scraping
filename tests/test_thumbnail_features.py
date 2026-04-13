@@ -1,0 +1,45 @@
+from __future__ import annotations
+
+import cv2
+import numpy as np
+
+from yt_insights.analytics.thumbnail_features import ThumbnailFeatureExtractor
+
+
+def _build_text_thumbnail() -> np.ndarray:
+    image = np.full((180, 320, 3), 255, dtype=np.uint8)
+    image[:, :160] = (30, 30, 220)
+    cv2.rectangle(image, (20, 110), (300, 165), (0, 0, 0), -1)
+    cv2.putText(
+        image,
+        "BIG MOVE",
+        (28, 148),
+        cv2.FONT_HERSHEY_SIMPLEX,
+        1.1,
+        (255, 255, 255),
+        3,
+        cv2.LINE_AA,
+    )
+    return image
+
+
+def test_thumbnail_extractor_detects_text_regions_and_colors() -> None:
+    extractor = ThumbnailFeatureExtractor()
+    features = extractor.extract_from_image(_build_text_thumbnail())
+
+    assert features.status == "complete"
+    assert features.has_thumbnail_text is True
+    assert features.estimated_thumbnail_text_tokens is not None
+    assert features.estimated_thumbnail_text_tokens >= 1
+    assert features.dominant_colors is not None
+    assert len(features.dominant_colors) == 3
+    assert all(color.startswith("#") for color in features.dominant_colors)
+    assert features.visual_style in {"graphic", "mixed", "simple"}
+
+
+def test_thumbnail_extractor_handles_invalid_bytes() -> None:
+    extractor = ThumbnailFeatureExtractor()
+    features = extractor.extract_from_bytes(b"not-an-image")
+
+    assert features.status == "decode_failed"
+    assert features.has_thumbnail_text is None

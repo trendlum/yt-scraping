@@ -1,0 +1,333 @@
+from __future__ import annotations
+
+import copy
+import logging
+from dataclasses import dataclass
+
+import cv2
+import numpy as np
+import requests
+
+from ..constants import DEFAULT_TIMEOUT
+from ..models import VideoFeatureRecord
+from ..clients.http import build_retry_session
+
+
+LOGGER = logging.getLogger(__name__)
+
+
+@dataclass(slots=True)
+class ThumbnailImageFeatures:
+    status: str
+    has_face: bool | None
+    face_count: int | None
+    has_thumbnail_text: bool | None
+    estimated_thumbnail_text_tokens: int | None
+    dominant_colors: list[str] | None
+    composition_type: str | None
+    contains_chart: bool | None
+    contains_map: bool | None
+    visual_style: str | None
+
+
+class ThumbnailFeatureExtractor:
+    def __init__(
+        self,
+        *,
+        timeout: int = DEFAULT_TIMEOUT,
+        session: requests.Session | None = None,
+    ) -> None:
+        self.timeout = timeout
+        self.session = session or build_retry_session()
+        self._cache: dict[str, ThumbnailImageFeatures] = {}
+        cascade_path = cv2.data.haarcascades + "haarcascade_frontalface_default.xml"
+        self.face_cascade = cv2.CascadeClassifier(cascade_path)
+
+    def extract_from_url(self, thumbnail_url: str | None) -> ThumbnailImageFeatures:
+        if not thumbnail_url:
+            return ThumbnailImageFeatures(
+                status="no_thumbnail",
+                has_face=None,
+                face_count=None,
+                has_thumbnail_text=None,
+                estimated_thumbnail_text_tokens=None,
+                dominant_colors=None,
+                composition_type=None,
+                contains_chart=None,
+                contains_map=None,
+                visual_style=None,
+            )
+
+        cached = self._cache.get(thumbnail_url)
+        if cached is not None:
+            return copy.deepcopy(cached)
+
+        try:
+            response = self.session.get(thumbnail_url, timeout=self.timeout)
+            response.raise_for_status()
+        except requests.RequestException as exc:
+            LOGGER.warning("Thumbnail download failed for %s: %s", thumbnail_url, exc)
+            features = ThumbnailImageFeatures(
+                status="download_failed",
+                has_face=None,
+                face_count=None,
+                has_thumbnail_text=None,
+                estimated_thumbnail_text_tokens=None,
+                dominant_colors=None,
+                composition_type=None,
+                contains_chart=None,
+                contains_map=None,
+                visual_style=None,
+            )
+            self._cache[thumbnail_url] = features
+            return copy.deepcopy(features)
+
+        features = self.extract_from_bytes(response.content)
+        self._cache[thumbnail_url] = features
+        return copy.deepcopy(features)
+
+    def extract_from_bytes(self, image_bytes: bytes) -> ThumbnailImageFeatures:
+        decoded = cv2.imdecode(np.frombuffer(image_bytes, dtype=np.uint8), cv2.IMREAD_COLOR)
+        if decoded is None:
+            return ThumbnailImageFeatures(
+                status="decode_failed",
+                has_face=None,
+                face_count=None,
+                has_thumbnail_text=None,
+                estimated_thumbnail_text_tokens=None,
+                dominant_colors=None,
+                composition_type=None,
+                contains_chart=None,
+                contains_map=None,
+                visual_style=None,
+            )
+        return self.extract_from_image(decoded)
+
+    def extract_from_image(self, image: np.ndarray) -> ThumbnailImageFeatures:
+        resized = _resize_for_analysis(image)
+        face_count = _detect_faces(resized, self.face_cascade)
+        has_text, estimated_tokens = _detect_text_like_regions(resized)
+        dominant_colors = _extract_dominant_colors(resized)
+        composition_type = _estimate_composition(resized)
+        contains_chart = _detect_chart_like_layout(resized, has_text, face_count)
+        contains_map = _detect_map_like_layout(resized, face_count, has_text)
+        visual_style = _classify_visual_style(resized, has_text, face_count, contains_chart)
+
+        return ThumbnailImageFeatures(
+            status="complete",
+            has_face=face_count > 0,
+            face_count=face_count,
+            has_thumbnail_text=has_text,
+            estimated_thumbnail_text_tokens=estimated_tokens,
+            dominant_colors=dominant_colors,
+            composition_type=composition_type,
+            contains_chart=contains_chart,
+            contains_map=contains_map,
+            visual_style=visual_style,
+        )
+
+
+def enrich_thumbnail_features(
+    feature_record: VideoFeatureRecord,
+    extractor: ThumbnailFeatureExtractor,
+) -> VideoFeatureRecord:
+    features = extractor.extract_from_url(feature_record.source_thumbnail_url)
+    feature_record.thumbnail_feature_status = features.status
+    feature_record.has_face = features.has_face
+    feature_record.face_count = features.face_count
+    feature_record.has_thumbnail_text = features.has_thumbnail_text
+    feature_record.estimated_thumbnail_text_tokens = features.estimated_thumbnail_text_tokens
+    feature_record.dominant_colors = features.dominant_colors
+    feature_record.composition_type = features.composition_type
+    feature_record.contains_chart = features.contains_chart
+    feature_record.contains_map = features.contains_map
+    feature_record.visual_style = features.visual_style
+    return feature_record
+
+
+def _resize_for_analysis(image: np.ndarray, width: int = 320) -> np.ndarray:
+    current_height, current_width = image.shape[:2]
+    if current_width <= width:
+        return image
+    ratio = width / float(current_width)
+    resized_height = max(1, int(current_height * ratio))
+    return cv2.resize(image, (width, resized_height), interpolation=cv2.INTER_AREA)
+
+
+def _detect_faces(image: np.ndarray, face_cascade: cv2.CascadeClassifier) -> int:
+    if face_cascade.empty():
+        return 0
+
+    grayscale = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+    equalized = cv2.equalizeHist(grayscale)
+    faces = face_cascade.detectMultiScale(
+        equalized,
+        scaleFactor=1.1,
+        minNeighbors=5,
+        minSize=(24, 24),
+    )
+    return int(len(faces))
+
+
+def _detect_text_like_regions(image: np.ndarray) -> tuple[bool, int]:
+    grayscale = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+    gradient = cv2.Sobel(grayscale, cv2.CV_32F, 1, 0, ksize=3)
+    gradient = cv2.convertScaleAbs(gradient)
+    blurred = cv2.GaussianBlur(gradient, (3, 3), 0)
+    _, binary = cv2.threshold(
+        blurred,
+        0,
+        255,
+        cv2.THRESH_BINARY + cv2.THRESH_OTSU,
+    )
+    grouped = cv2.morphologyEx(
+        binary,
+        cv2.MORPH_CLOSE,
+        cv2.getStructuringElement(cv2.MORPH_RECT, (21, 5)),
+    )
+    grouped = cv2.dilate(grouped, cv2.getStructuringElement(cv2.MORPH_RECT, (5, 3)), iterations=1)
+
+    contours, _ = cv2.findContours(grouped, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    image_area = image.shape[0] * image.shape[1]
+    token_estimate = 0
+    accepted_regions = 0
+
+    for contour in contours:
+        x, y, width, height = cv2.boundingRect(contour)
+        box_area = width * height
+        area_ratio = box_area / float(image_area)
+        aspect_ratio = width / float(max(height, 1))
+        if area_ratio < 0.004 or area_ratio > 0.35:
+            continue
+        if aspect_ratio < 1.6 or width < image.shape[1] * 0.14 or height > image.shape[0] * 0.38:
+            continue
+
+        region = grouped[y : y + height, x : x + width]
+        density = float(np.count_nonzero(region)) / float(max(box_area, 1))
+        if density < 0.08 or density > 0.9:
+            continue
+
+        accepted_regions += 1
+        token_estimate += max(1, round(width / 32))
+
+    token_estimate = int(min(token_estimate, 24))
+    return accepted_regions > 0, token_estimate
+
+
+def _extract_dominant_colors(image: np.ndarray, top_k: int = 3) -> list[str]:
+    rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+    reduced = cv2.resize(rgb, (64, 64), interpolation=cv2.INTER_AREA)
+    quantized = ((reduced // 64) * 64 + 32).reshape(-1, 3)
+    colors, counts = np.unique(quantized, axis=0, return_counts=True)
+    top_indices = np.argsort(counts)[::-1][:top_k]
+    dominant: list[str] = []
+    for index in top_indices:
+        red, green, blue = [int(value) for value in colors[index]]
+        dominant.append(f"#{red:02x}{green:02x}{blue:02x}")
+    return dominant
+
+
+def _estimate_composition(image: np.ndarray) -> str:
+    grayscale = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+    edges = cv2.Canny(grayscale, 80, 160)
+    thirds = np.array_split(edges, 3, axis=1)
+    densities = [float(np.count_nonzero(section)) / float(section.size) for section in thirds]
+    max_index = int(np.argmax(densities))
+    mean_density = float(sum(densities) / len(densities))
+    if mean_density == 0:
+        return "balanced"
+    if densities[max_index] < mean_density * 1.2:
+        return "balanced"
+    return ["left_focus", "center_focus", "right_focus"][max_index]
+
+
+def _detect_chart_like_layout(image: np.ndarray, has_text: bool, face_count: int) -> bool:
+    grayscale = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+    edges = cv2.Canny(grayscale, 80, 180)
+    lines = cv2.HoughLinesP(
+        edges,
+        1,
+        np.pi / 180,
+        threshold=35,
+        minLineLength=max(25, int(image.shape[1] * 0.12)),
+        maxLineGap=8,
+    )
+    if lines is None:
+        return False
+
+    horizontal = 0
+    vertical = 0
+    horizontal_positions: list[int] = []
+    vertical_positions: list[int] = []
+    for line in lines[:, 0]:
+        x1, y1, x2, y2 = [int(value) for value in line]
+        dx = abs(x2 - x1)
+        dy = abs(y2 - y1)
+        if dx >= image.shape[1] * 0.18 and dy <= 6:
+            horizontal += 1
+            horizontal_positions.append(int((y1 + y2) / 2))
+        if dy >= image.shape[0] * 0.18 and dx <= 6:
+            vertical += 1
+            vertical_positions.append(int((x1 + x2) / 2))
+
+    unique_horizontal = _cluster_positions(horizontal_positions, tolerance=8)
+    unique_vertical = _cluster_positions(vertical_positions, tolerance=8)
+    if face_count > 0 and not has_text:
+        return False
+    if face_count > 0:
+        return bool(
+            horizontal >= 8
+            and vertical >= 4
+            and len(unique_horizontal) >= 4
+            and len(unique_vertical) >= 3
+        )
+    if horizontal >= 4 and vertical >= 2 and len(unique_horizontal) >= 3 and len(unique_vertical) >= 2:
+        return True
+    return bool(horizontal >= 7 and vertical >= 3 and not has_text)
+
+
+def _detect_map_like_layout(image: np.ndarray, face_count: int, has_text: bool) -> bool:
+    if face_count > 0:
+        return False
+
+    hsv = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
+    blue_mask = cv2.inRange(hsv, (90, 40, 40), (130, 255, 255))
+    green_mask = cv2.inRange(hsv, (35, 30, 30), (90, 255, 255))
+    blue_ratio = float(np.count_nonzero(blue_mask)) / float(blue_mask.size)
+    green_ratio = float(np.count_nonzero(green_mask)) / float(green_mask.size)
+    return bool(blue_ratio >= 0.15 and green_ratio >= 0.08 and not has_text)
+
+
+def _classify_visual_style(
+    image: np.ndarray,
+    has_text: bool,
+    face_count: int,
+    contains_chart: bool,
+) -> str:
+    hsv = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
+    saturation = float(np.mean(hsv[:, :, 1])) / 255.0
+    grayscale = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+    contrast = float(np.std(grayscale))
+    edges = cv2.Canny(grayscale, 80, 160)
+    edge_density = float(np.count_nonzero(edges)) / float(edges.size)
+
+    if contains_chart:
+        return "chart"
+    if face_count > 0 and saturation >= 0.25:
+        return "photo"
+    if has_text and contrast >= 45 and edge_density >= 0.08:
+        return "graphic"
+    if saturation >= 0.32 and edge_density >= 0.09:
+        return "mixed"
+    return "simple"
+
+
+def _cluster_positions(values: list[int], tolerance: int) -> list[int]:
+    if not values:
+        return []
+    ordered = sorted(values)
+    clusters = [ordered[0]]
+    for value in ordered[1:]:
+        if abs(value - clusters[-1]) > tolerance:
+            clusters.append(value)
+    return clusters
