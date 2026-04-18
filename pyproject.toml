@@ -9,6 +9,7 @@ description = "YouTube channel scraping and performance analytics pipeline."
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
+  "easyocr>=1.7,<2",
   "numpy>=2.0,<3",
   "opencv-python-headless>=4.10,<5",
   "requests>=2.31,<3",

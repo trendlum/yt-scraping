@@ -9,6 +9,7 @@ Refactor incremental del scraper actual hacia una herramienta de análisis de re
 - Añade snapshots históricos en `yt_video_metric_snapshots`.
 - Calcula una primera capa de performance en `yt_video_performance`.
 - Extrae features heurísticas de títulos en `yt_video_features`.
+- Extrae transcript si hay captions disponibles y lo guarda en `yt_video_features`.
 - Extrae features visuales v1 de thumbnail en `yt_video_features`.
 - Mantiene la CLI compatible con `python youtube_channel_scraper.py`.
 
@@ -79,7 +80,7 @@ python youtube_channel_scraper.py --monitor-days 30 --baseline-window-days 30 --
 - Descubre vídeos nuevos en la playlist del canal.
 - Reutiliza vídeos ya conocidos en `yt_videos` dentro de esa ventana para seguir acumulando snapshots.
 - Calcula baselines y ratios por canal sobre una ventana de publicación de `--baseline-window-days`.
-- Descarga thumbnails y rellena `has_face`, `face_count`, `has_thumbnail_text`, `estimated_thumbnail_text_tokens`, `dominant_colors`, `composition_type`, `contains_chart`, `contains_map` y `visual_style`.
+- Descarga thumbnails y rellena `has_face`, `face_count`, `has_thumbnail_text`, `estimated_thumbnail_text_tokens`, `thumbnail_ocr_status`, `thumbnail_text`, `thumbnail_text_confidence`, `dominant_colors`, `composition_type`, `contains_chart`, `contains_map` y `visual_style`.
 
 ## Tests
 
@@ -118,6 +119,8 @@ Notas operativas:
 ## Limitaciones actuales
 
 - `dominant_emotion` sigue sin extraerse; permanece `null`.
+- `thumbnail_text` depende de `easyocr`; en la primera ejecucion puede necesitar descargar modelos. Usa `thumbnail_ocr_status` para distinguir `extracted`, `no_text`, `not_available`, `failed`, `no_thumbnail`, `download_failed` y `decode_failed`.
+- El transcript depende de que YouTube exponga captions en la pagina del video; si no existen, la fila queda con `transcript_status = no_captions`.
 - `contains_chart` y `contains_map` son heurísticas conservadoras y deben revisarse con muestra real antes de usarlas para decisiones fuertes.
 - El scoring es una v1 heurística; sirve para priorizar análisis, no para automatizar decisiones finales.
 - La persistencia sigue usando la REST API de Supabase vía `requests`, no el SDK.

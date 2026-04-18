@@ -343,11 +343,18 @@ class VideoFeatureRecord:
     has_colon: bool
     trigger_word_count: int
     title_pattern: str
+    transcript_status: str = "pending"
+    transcript_language: str | None = None
+    transcript_is_auto_generated: bool | None = None
+    transcript_text: str | None = None
     thumbnail_feature_status: str = "pending"
+    thumbnail_ocr_status: str = "pending"
     has_face: bool | None = None
     face_count: int | None = None
     has_thumbnail_text: bool | None = None
     estimated_thumbnail_text_tokens: int | None = None
+    thumbnail_text: str | None = None
+    thumbnail_text_confidence: float | None = None
     dominant_emotion: str | None = None
     dominant_colors: list[str] | None = None
     composition_type: str | None = None
@@ -378,11 +385,18 @@ class VideoFeatureRecord:
             "has_colon": self.has_colon,
             "trigger_word_count": self.trigger_word_count,
             "title_pattern": self.title_pattern,
+            "transcript_status": self.transcript_status,
+            "transcript_language": self.transcript_language,
+            "transcript_is_auto_generated": self.transcript_is_auto_generated,
+            "transcript_text": self.transcript_text,
             "thumbnail_feature_status": self.thumbnail_feature_status,
+            "thumbnail_ocr_status": self.thumbnail_ocr_status,
             "has_face": self.has_face,
             "face_count": self.face_count,
             "has_thumbnail_text": self.has_thumbnail_text,
             "estimated_thumbnail_text_tokens": self.estimated_thumbnail_text_tokens,
+            "thumbnail_text": self.thumbnail_text,
+            "thumbnail_text_confidence": self.thumbnail_text_confidence,
             "dominant_emotion": self.dominant_emotion,
             "dominant_colors": self.dominant_colors,
             "composition_type": self.composition_type,

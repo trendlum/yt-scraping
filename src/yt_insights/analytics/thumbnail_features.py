@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import copy
 import logging
+import re
 from dataclasses import dataclass
+from typing import Any, Protocol
 
 import cv2
 import numpy as np
@@ -12,17 +14,31 @@ from ..constants import DEFAULT_TIMEOUT
 from ..models import VideoFeatureRecord
 from ..clients.http import build_retry_session
 
+try:
+    import easyocr
+except ImportError:  # pragma: no cover
+    easyocr = None
+
 
 LOGGER = logging.getLogger(__name__)
+_THUMBNAIL_WORD_RE = re.compile(r"[A-Za-z0-9']+")
+
+
+class OCRReader(Protocol):
+    def readtext(self, image: Any, detail: int = 1, paragraph: bool = False) -> list[Any]:
+        ...
 
 
 @dataclass(slots=True)
 class ThumbnailImageFeatures:
     status: str
+    ocr_status: str
     has_face: bool | None
     face_count: int | None
     has_thumbnail_text: bool | None
     estimated_thumbnail_text_tokens: int | None
+    thumbnail_text: str | None
+    thumbnail_text_confidence: float | None
     dominant_colors: list[str] | None
     composition_type: str | None
     contains_chart: bool | None
@@ -36,10 +52,17 @@ class ThumbnailFeatureExtractor:
         *,
         timeout: int = DEFAULT_TIMEOUT,
         session: requests.Session | None = None,
+        ocr_reader: OCRReader | None = None,
+        enable_ocr: bool = True,
+        ocr_languages: tuple[str, ...] = ("en", "es"),
     ) -> None:
         self.timeout = timeout
         self.session = session or build_retry_session()
         self._cache: dict[str, ThumbnailImageFeatures] = {}
+        self._ocr_reader = ocr_reader
+        self._ocr_available = enable_ocr
+        self._ocr_languages = list(ocr_languages)
+        self._ocr_init_attempted = ocr_reader is not None
         cascade_path = cv2.data.haarcascades + "haarcascade_frontalface_default.xml"
         self.face_cascade = cv2.CascadeClassifier(cascade_path)
 
@@ -47,10 +70,13 @@ class ThumbnailFeatureExtractor:
         if not thumbnail_url:
             return ThumbnailImageFeatures(
                 status="no_thumbnail",
+                ocr_status="no_thumbnail",
                 has_face=None,
                 face_count=None,
                 has_thumbnail_text=None,
                 estimated_thumbnail_text_tokens=None,
+                thumbnail_text=None,
+                thumbnail_text_confidence=None,
                 dominant_colors=None,
                 composition_type=None,
                 contains_chart=None,
@@ -69,10 +95,13 @@ class ThumbnailFeatureExtractor:
             LOGGER.warning("Thumbnail download failed for %s: %s", thumbnail_url, exc)
             features = ThumbnailImageFeatures(
                 status="download_failed",
+                ocr_status="download_failed",
                 has_face=None,
                 face_count=None,
                 has_thumbnail_text=None,
                 estimated_thumbnail_text_tokens=None,
+                thumbnail_text=None,
+                thumbnail_text_confidence=None,
                 dominant_colors=None,
                 composition_type=None,
                 contains_chart=None,
@@ -91,10 +120,13 @@ class ThumbnailFeatureExtractor:
         if decoded is None:
             return ThumbnailImageFeatures(
                 status="decode_failed",
+                ocr_status="decode_failed",
                 has_face=None,
                 face_count=None,
                 has_thumbnail_text=None,
                 estimated_thumbnail_text_tokens=None,
+                thumbnail_text=None,
+                thumbnail_text_confidence=None,
                 dominant_colors=None,
                 composition_type=None,
                 contains_chart=None,
@@ -107,6 +139,10 @@ class ThumbnailFeatureExtractor:
         resized = _resize_for_analysis(image)
         face_count = _detect_faces(resized, self.face_cascade)
         has_text, estimated_tokens = _detect_text_like_regions(resized)
+        thumbnail_text, thumbnail_text_confidence, ocr_status = self._extract_thumbnail_text(image)
+        if thumbnail_text:
+            has_text = True
+            estimated_tokens = max(estimated_tokens, len(_THUMBNAIL_WORD_RE.findall(thumbnail_text)))
         dominant_colors = _extract_dominant_colors(resized)
         composition_type = _estimate_composition(resized)
         contains_chart = _detect_chart_like_layout(resized, has_text, face_count)
@@ -115,16 +151,75 @@ class ThumbnailFeatureExtractor:
 
         return ThumbnailImageFeatures(
             status="complete",
+            ocr_status=ocr_status,
             has_face=face_count > 0,
             face_count=face_count,
             has_thumbnail_text=has_text,
             estimated_thumbnail_text_tokens=estimated_tokens,
+            thumbnail_text=thumbnail_text,
+            thumbnail_text_confidence=thumbnail_text_confidence,
             dominant_colors=dominant_colors,
             composition_type=composition_type,
             contains_chart=contains_chart,
             contains_map=contains_map,
             visual_style=visual_style,
         )
+
+    def _extract_thumbnail_text(self, image: np.ndarray) -> tuple[str | None, float | None, str]:
+        reader = self._get_ocr_reader()
+        if reader is None:
+            return None, None, "not_available"
+
+        prepared = _prepare_image_for_ocr(image)
+        try:
+            detections = reader.readtext(prepared, detail=1, paragraph=False)
+        except Exception as exc:  # pragma: no cover
+            LOGGER.warning("Thumbnail OCR failed: %s", exc)
+            return None, None, "failed"
+
+        texts: list[str] = []
+        confidences: list[float] = []
+        for detection in detections:
+            if not isinstance(detection, (list, tuple)) or len(detection) < 3:
+                continue
+            text = str(detection[1]).strip()
+            if not text:
+                continue
+            texts.append(text)
+            confidence = _to_confidence(detection[2])
+            if confidence is not None:
+                confidences.append(confidence)
+
+        if not texts:
+            return None, None, "no_text"
+
+        normalized_text = _normalize_ocr_text(texts)
+        if not normalized_text:
+            return None, None, "no_text"
+        average_confidence = round(sum(confidences) / len(confidences), 4) if confidences else None
+        return normalized_text, average_confidence, "extracted"
+
+    def _get_ocr_reader(self) -> OCRReader | None:
+        if not self._ocr_available:
+            return None
+        if self._ocr_reader is not None:
+            return self._ocr_reader
+        if self._ocr_init_attempted:
+            return None
+
+        self._ocr_init_attempted = True
+        if easyocr is None:
+            LOGGER.warning("easyocr is not installed; thumbnail OCR disabled")
+            self._ocr_available = False
+            return None
+
+        try:
+            self._ocr_reader = easyocr.Reader(self._ocr_languages, gpu=False, verbose=False)
+        except Exception as exc:  # pragma: no cover
+            LOGGER.warning("easyocr initialization failed; thumbnail OCR disabled: %s", exc)
+            self._ocr_available = False
+            return None
+        return self._ocr_reader
 
 
 def enrich_thumbnail_features(
@@ -133,10 +228,13 @@ def enrich_thumbnail_features(
 ) -> VideoFeatureRecord:
     features = extractor.extract_from_url(feature_record.source_thumbnail_url)
     feature_record.thumbnail_feature_status = features.status
+    feature_record.thumbnail_ocr_status = features.ocr_status
     feature_record.has_face = features.has_face
     feature_record.face_count = features.face_count
     feature_record.has_thumbnail_text = features.has_thumbnail_text
     feature_record.estimated_thumbnail_text_tokens = features.estimated_thumbnail_text_tokens
+    feature_record.thumbnail_text = features.thumbnail_text
+    feature_record.thumbnail_text_confidence = features.thumbnail_text_confidence
     feature_record.dominant_colors = features.dominant_colors
     feature_record.composition_type = features.composition_type
     feature_record.contains_chart = features.contains_chart
@@ -152,6 +250,13 @@ def _resize_for_analysis(image: np.ndarray, width: int = 320) -> np.ndarray:
     ratio = width / float(current_width)
     resized_height = max(1, int(current_height * ratio))
     return cv2.resize(image, (width, resized_height), interpolation=cv2.INTER_AREA)
+
+
+def _prepare_image_for_ocr(image: np.ndarray, width: int = 640) -> np.ndarray:
+    resized = _resize_for_analysis(image, width=width)
+    grayscale = cv2.cvtColor(resized, cv2.COLOR_BGR2GRAY)
+    normalized = cv2.normalize(grayscale, None, 0, 255, cv2.NORM_MINMAX)
+    return cv2.cvtColor(normalized, cv2.COLOR_GRAY2RGB)
 
 
 def _detect_faces(image: np.ndarray, face_cascade: cv2.CascadeClassifier) -> int:
@@ -331,3 +436,21 @@ def _cluster_positions(values: list[int], tolerance: int) -> list[int]:
         if abs(value - clusters[-1]) > tolerance:
             clusters.append(value)
     return clusters
+
+
+def _normalize_ocr_text(chunks: list[str]) -> str | None:
+    normalized_chunks: list[str] = []
+    for chunk in chunks:
+        compact = " ".join(chunk.split())
+        if compact:
+            normalized_chunks.append(compact)
+    if not normalized_chunks:
+        return None
+    return " ".join(normalized_chunks)
+
+
+def _to_confidence(value: Any) -> float | None:
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None

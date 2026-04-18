@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
+from yt_insights.analytics.transcript_features import TranscriptFeatures
 from yt_insights.models import VideoMetricSnapshot, VideoRecord
 from yt_insights.services.scraper import merge_unique_video_ids, run_batch_scrape
 
@@ -77,6 +78,16 @@ class FakeRepository:
         self.updated_at = executed_at
 
 
+class FakeTranscriptExtractor:
+    def extract_from_video_id(self, video_id: str) -> TranscriptFeatures:
+        return TranscriptFeatures(
+            status="complete",
+            language="en",
+            is_auto_generated=False,
+            transcript_text=f"Transcript for {video_id}",
+        )
+
+
 def test_merge_unique_video_ids_preserves_order() -> None:
     assert merge_unique_video_ids(["a", "b"], ["b", "c"]) == ["a", "b", "c"]
 
@@ -90,11 +101,16 @@ def test_run_batch_scrape_persists_current_rows_snapshots_and_features() -> None
         monitor_days=30,
         baseline_window_days=30,
         executed_at=datetime(2026, 4, 13, tzinfo=timezone.utc),
+        transcript_extractor=FakeTranscriptExtractor(),
     )
 
     assert len(result) == 1
     assert len(repo.current_rows) == 2
     assert len(repo.snapshot_rows) == 2
     assert len(repo.feature_rows) == 2
+    assert all(row["transcript_status"] == "complete" for row in repo.feature_rows)
+    assert all(row["transcript_language"] == "en" for row in repo.feature_rows)
+    assert all(row["transcript_text"] is not None for row in repo.feature_rows)
     assert all(row["thumbnail_feature_status"] == "no_thumbnail" for row in repo.feature_rows)
+    assert all(row["thumbnail_ocr_status"] == "no_thumbnail" for row in repo.feature_rows)
     assert repo.updated_at == datetime(2026, 4, 13, tzinfo=timezone.utc)

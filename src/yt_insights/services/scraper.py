@@ -4,6 +4,7 @@ import logging
 from datetime import datetime, timedelta
 
 from ..analytics.performance import build_performance_records
+from ..analytics.transcript_features import TranscriptFeatureExtractor, enrich_transcript_features
 from ..analytics.thumbnail_features import ThumbnailFeatureExtractor, enrich_thumbnail_features
 from ..analytics.title_features import extract_title_features
 from ..clients.supabase import SupabaseClient
@@ -82,6 +83,8 @@ def run_batch_scrape(
     monitor_days: int = DEFAULT_MONITOR_DAYS,
     baseline_window_days: int = DEFAULT_BASELINE_WINDOW_DAYS,
     executed_at: datetime | None = None,
+    transcript_extractor: TranscriptFeatureExtractor | None = None,
+    thumbnail_extractor: ThumbnailFeatureExtractor | None = None,
 ) -> list[dict]:
     run_started_at = executed_at or utc_now()
     monitor_cutoff = run_started_at - timedelta(days=monitor_days)
@@ -93,8 +96,12 @@ def run_batch_scrape(
     snapshot_rows: list[dict] = []
     feature_rows: list[dict] = []
     errors: list[str] = []
-    thumbnail_extractor = ThumbnailFeatureExtractor(
+    thumbnail_extractor = thumbnail_extractor or ThumbnailFeatureExtractor(
         timeout=getattr(youtube_client, "timeout", DEFAULT_TIMEOUT)
+    )
+    transcript_extractor = transcript_extractor or TranscriptFeatureExtractor(
+        timeout=getattr(youtube_client, "timeout", DEFAULT_TIMEOUT),
+        session=getattr(youtube_client, "session", None),
     )
 
     for handle in channel_handles:
@@ -121,6 +128,7 @@ def run_batch_scrape(
                 handle,
                 extracted_at=run_started_at,
             )
+            feature_record = enrich_transcript_features(feature_record, transcript_extractor)
             feature_record = enrich_thumbnail_features(feature_record, thumbnail_extractor)
             feature_rows.append(feature_record.to_row())
 

@@ -4,6 +4,6 @@ DEFAULT_MONITOR_DAYS = 30
 DEFAULT_BASELINE_WINDOW_DAYS = 30
 THUMBNAIL_PRIORITY = ("maxres", "standard", "high", "medium", "default")
 SCRAPER_STATE_NAME = "youtube_channel_scraper"
-VIDEO_FEATURES_EXTRACTOR_VERSION = "video_features_v2"
+VIDEO_FEATURES_EXTRACTOR_VERSION = "video_features_v4"
 PERFORMANCE_MODEL_VERSION = "performance_v1"
 BASELINE_ANCHOR_DAYS = (1, 3, 7, 15)
