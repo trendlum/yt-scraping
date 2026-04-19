@@ -7,7 +7,6 @@ from datetime import datetime, timedelta
 from typing import Any
 
 from ..analytics.performance import build_performance_records
-from ..analytics.transcript_features import TranscriptFeatureExtractor, enrich_transcript_features
 from ..analytics.thumbnail_features import ThumbnailFeatureExtractor, enrich_thumbnail_features
 from ..analytics.title_features import extract_title_features
 from ..clients.supabase import SupabaseClient
@@ -24,24 +23,6 @@ from ..repositories.supabase import SupabaseRepository
 
 
 LOGGER = logging.getLogger(__name__)
-
-_TRANSCRIPT_FIELDS = (
-    "transcript_status",
-    "transcript_language",
-    "transcript_is_auto_generated",
-    "transcript_text",
-)
-
-_TRANSCRIPT_RETRYABLE_STATUSES = {
-    None,
-    "",
-    "pending",
-    "download_failed",
-    "request_blocked",
-    "ip_blocked",
-    "dependency_missing",
-    "video_unplayable",
-}
 
 _THUMBNAIL_FIELDS = (
     "thumbnail_feature_status",
@@ -133,19 +114,11 @@ def _resolve_feature_workers(feature_workers: int | None) -> int:
     return max(1, feature_workers)
 
 
-def _skip_transcript_fields(feature_record: Any) -> None:
-    feature_record.transcript_status = "skipped"
-    feature_record.transcript_language = None
-    feature_record.transcript_is_auto_generated = None
-    feature_record.transcript_text = None
-
-
 def _build_feature_row(
     video: Any,
     channel_handle: str,
     run_started_at: datetime,
     should_analyze_thumbnail: bool,
-    transcript_extractor: TranscriptFeatureExtractor,
     thumbnail_extractor: ThumbnailFeatureExtractor,
 ) -> dict:
     feature_record = extract_title_features(
@@ -153,7 +126,6 @@ def _build_feature_row(
         channel_handle,
         extracted_at=run_started_at,
     )
-    feature_record = enrich_transcript_features(feature_record, transcript_extractor)
     if should_analyze_thumbnail:
         feature_record = enrich_thumbnail_features(feature_record, thumbnail_extractor)
     else:
@@ -172,9 +144,7 @@ def _parallel_feature_rows(
     channel_handle: str,
     run_started_at: datetime,
     should_analyze_thumbnail: bool,
-    should_analyze_transcript: bool,
     feature_workers: int,
-    transcript_extractor_factory: Any,
     thumbnail_extractor_factory: Any,
     existing_feature_rows: dict[str, dict[str, Any]],
 ) -> list[dict]:
@@ -192,12 +162,6 @@ def _parallel_feature_rows(
         existing_row = existing_feature_rows.get(video.video_id)
 
         if existing_row is not None:
-            transcript_status = existing_row.get("transcript_status")
-            should_reuse_transcript = transcript_status not in _TRANSCRIPT_RETRYABLE_STATUSES
-            if should_reuse_transcript:
-                for field_name in _TRANSCRIPT_FIELDS:
-                    setattr(feature_record, field_name, existing_row.get(field_name))
-
             thumbnail_status = existing_row.get("thumbnail_feature_status")
             should_reuse_thumbnail = thumbnail_status not in _THUMBNAIL_RETRYABLE_STATUSES
             thumbnail_unchanged = (
@@ -210,7 +174,6 @@ def _parallel_feature_rows(
             else:
                 should_reuse_thumbnail = False
         else:
-            should_reuse_transcript = False
             should_reuse_thumbnail = False
 
         if not should_reuse_thumbnail and should_analyze_thumbnail:
@@ -223,19 +186,6 @@ def _parallel_feature_rows(
             feature_record.estimated_thumbnail_text_tokens = None
             feature_record.thumbnail_text = None
             feature_record.thumbnail_text_confidence = None
-
-        if should_analyze_transcript:
-            if should_reuse_transcript and existing_row is not None:
-                for field_name in _TRANSCRIPT_FIELDS:
-                    setattr(feature_record, field_name, existing_row.get(field_name))
-            else:
-                transcript_extractor = transcript_extractor_factory()
-                feature_record = enrich_transcript_features(feature_record, transcript_extractor)
-        elif existing_row is not None:
-            for field_name in _TRANSCRIPT_FIELDS:
-                setattr(feature_record, field_name, existing_row.get(field_name))
-        else:
-            _skip_transcript_fields(feature_record)
 
         return feature_record.to_row()
 
@@ -254,9 +204,7 @@ def run_batch_scrape(
     monitor_days: int = DEFAULT_MONITOR_DAYS,
     baseline_window_days: int = DEFAULT_BASELINE_WINDOW_DAYS,
     feature_workers: int | None = DEFAULT_FEATURE_WORKERS,
-    should_analyze_transcript: bool = True,
     executed_at: datetime | None = None,
-    transcript_extractor: TranscriptFeatureExtractor | None = None,
     thumbnail_extractor: ThumbnailFeatureExtractor | None = None,
 ) -> list[dict]:
     run_started_at = executed_at or utc_now()
@@ -279,16 +227,6 @@ def run_batch_scrape(
     else:
         def thumbnail_extractor_factory() -> ThumbnailFeatureExtractor:
             return thumbnail_extractor
-
-    if transcript_extractor is None:
-        def transcript_extractor_factory() -> TranscriptFeatureExtractor:
-            return TranscriptFeatureExtractor(
-                timeout=timeout,
-                session=youtube_session,
-            )
-    else:
-        def transcript_extractor_factory() -> TranscriptFeatureExtractor:
-            return transcript_extractor
 
     for channel_config in channel_configs:
         handle = channel_config["channel_handle"]
@@ -321,9 +259,7 @@ def run_batch_scrape(
                 channel_handle=handle,
                 run_started_at=run_started_at,
                 should_analyze_thumbnail=should_analyze_thumbnail,
-                should_analyze_transcript=should_analyze_transcript,
                 feature_workers=feature_workers,
-                transcript_extractor_factory=transcript_extractor_factory,
                 thumbnail_extractor_factory=thumbnail_extractor_factory,
                 existing_feature_rows=existing_feature_rows,
             )
@@ -393,7 +329,6 @@ def scrape_and_store_channels(
     monitor_days: int = DEFAULT_MONITOR_DAYS,
     baseline_window_days: int = DEFAULT_BASELINE_WINDOW_DAYS,
     feature_workers: int | None = DEFAULT_FEATURE_WORKERS,
-    should_analyze_transcript: bool = True,
 ) -> list[dict]:
     youtube_client = YouTubeClient(api_key, timeout=timeout)
     repository = SupabaseRepository(
@@ -410,5 +345,4 @@ def scrape_and_store_channels(
         monitor_days=monitor_days,
         baseline_window_days=baseline_window_days,
         feature_workers=feature_workers,
-        should_analyze_transcript=should_analyze_transcript,
     )

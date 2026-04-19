@@ -20,7 +20,7 @@ on:
         default: "30"
         type: string
       feature_workers:
-        description: "Worker threads used for transcript and thumbnail enrichment"
+        description: "Worker threads used for thumbnail enrichment"
         required: false
         default: "2"
         type: string
