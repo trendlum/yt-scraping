@@ -73,6 +73,25 @@ class SupabaseRepository:
         )
         return [row["video_id"] for row in payload or [] if row.get("video_id")]
 
+    def get_feature_rows(self, video_ids: list[str], *, limit: int = 5000) -> dict[str, dict[str, Any]]:
+        if not video_ids:
+            return {}
+
+        payload = self.client.request(
+            "GET",
+            "yt_video_features",
+            params={
+                "select": "*",
+                "video_id": _format_in_filter(video_ids),
+                "limit": limit,
+            },
+        )
+        return {
+            str(row["video_id"]): row
+            for row in payload or []
+            if row.get("video_id")
+        }
+
     def get_snapshots_for_channels(
         self,
         channel_handles: list[str],

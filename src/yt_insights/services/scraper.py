@@ -25,6 +25,30 @@ from ..repositories.supabase import SupabaseRepository
 
 LOGGER = logging.getLogger(__name__)
 
+_TRANSCRIPT_FIELDS = (
+    "transcript_status",
+    "transcript_language",
+    "transcript_is_auto_generated",
+    "transcript_text",
+)
+
+_THUMBNAIL_FIELDS = (
+    "thumbnail_feature_status",
+    "thumbnail_ocr_status",
+    "has_face",
+    "face_count",
+    "has_thumbnail_text",
+    "estimated_thumbnail_text_tokens",
+    "thumbnail_text",
+    "thumbnail_text_confidence",
+    "dominant_emotion",
+    "dominant_colors",
+    "composition_type",
+    "contains_chart",
+    "contains_map",
+    "visual_style",
+)
+
 
 def merge_unique_video_ids(*video_id_groups: list[str]) -> list[str]:
     ordered: list[str] = []
@@ -116,7 +140,7 @@ def _build_feature_row(
 
 
 def _parallel_feature_rows(
-    channel_result: ChannelScrapeResult,
+    videos: list[Any],
     *,
     channel_handle: str,
     run_started_at: datetime,
@@ -124,39 +148,52 @@ def _parallel_feature_rows(
     feature_workers: int,
     transcript_extractor_factory: Any,
     thumbnail_extractor_factory: Any,
+    existing_feature_rows: dict[str, dict[str, Any]],
 ) -> list[dict]:
-    videos = channel_result.videos
     if not videos:
         return []
-
-    if feature_workers <= 1 or len(videos) == 1:
-        transcript_extractor = transcript_extractor_factory()
-        thumbnail_extractor = thumbnail_extractor_factory()
-        return [
-            _build_feature_row(
-                video,
-                channel_handle,
-                run_started_at,
-                should_analyze_thumbnail,
-                transcript_extractor,
-                thumbnail_extractor,
-            )
-            for video in videos
-        ]
 
     max_workers = min(feature_workers, len(videos), max(1, (os.cpu_count() or 1) * 4))
 
     def build_row(video: Any) -> dict:
-        transcript_extractor = transcript_extractor_factory()
-        thumbnail_extractor = thumbnail_extractor_factory()
-        return _build_feature_row(
+        feature_record = extract_title_features(
             video,
             channel_handle,
-            run_started_at,
-            should_analyze_thumbnail,
-            transcript_extractor,
-            thumbnail_extractor,
+            extracted_at=run_started_at,
         )
+        existing_row = existing_feature_rows.get(video.video_id)
+
+        if existing_row is not None:
+            for field_name in _TRANSCRIPT_FIELDS:
+                setattr(feature_record, field_name, existing_row.get(field_name))
+
+            thumbnail_unchanged = (
+                existing_row.get("thumbnail_fingerprint") == feature_record.thumbnail_fingerprint
+            )
+            if thumbnail_unchanged:
+                for field_name in _THUMBNAIL_FIELDS:
+                    setattr(feature_record, field_name, existing_row.get(field_name))
+                return feature_record.to_row()
+
+        if should_analyze_thumbnail:
+            thumbnail_extractor = thumbnail_extractor_factory()
+            feature_record = enrich_thumbnail_features(feature_record, thumbnail_extractor)
+        else:
+            feature_record.thumbnail_feature_status = "skipped"
+            feature_record.thumbnail_ocr_status = "skipped"
+            feature_record.has_thumbnail_text = None
+            feature_record.estimated_thumbnail_text_tokens = None
+            feature_record.thumbnail_text = None
+            feature_record.thumbnail_text_confidence = None
+
+        if existing_row is None:
+            transcript_extractor = transcript_extractor_factory()
+            feature_record = enrich_transcript_features(feature_record, transcript_extractor)
+
+        return feature_record.to_row()
+
+    if feature_workers <= 1 or len(videos) == 1:
+        return [build_row(video) for video in videos]
 
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
         return list(executor.map(build_row, videos))
@@ -226,15 +263,20 @@ def run_batch_scrape(
         for video in channel_result.videos:
             current_rows.append(video.to_current_row(handle, run_started_at))
             snapshot_rows.append(video.to_snapshot_row(handle, run_started_at))
+
+        existing_feature_rows = repository.get_feature_rows(
+            [video.video_id for video in channel_result.videos]
+        )
         feature_rows.extend(
             _parallel_feature_rows(
-                channel_result,
+                channel_result.videos,
                 channel_handle=handle,
                 run_started_at=run_started_at,
                 should_analyze_thumbnail=should_analyze_thumbnail,
                 feature_workers=feature_workers,
                 transcript_extractor_factory=transcript_extractor_factory,
                 thumbnail_extractor_factory=thumbnail_extractor_factory,
+                existing_feature_rows=existing_feature_rows,
             )
         )
 
