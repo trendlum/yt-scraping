@@ -13,6 +13,8 @@ Refactor incremental del scraper actual hacia una herramienta de análisis de re
 - Extrae features visuales v1 de thumbnail en `yt_video_features`.
 - Mantiene la CLI compatible con `python youtube_channel_scraper.py`.
 - Expone entrypoints ordenados dentro del paquete y scripts de compatibilidad en la raiz.
+- Permite desactivar el enriquecimiento de transcript en batch para evitar bloqueos de IP en runners cloud.
+- Incluye un backfill local de transcript para reintentar filas recientes o bloqueadas fuera de GitHub Actions.
 
 ## Estructura
 
@@ -78,11 +80,24 @@ Batch con persistencia y analytics:
 python -m yt_insights --monitor-days 30 --baseline-window-days 30 --feature-workers 8 --output latest_run.json
 ```
 
+Batch sin transcript, pensado para GitHub Actions o runners cloud con bloqueo de IP:
+
+```bash
+python -m yt_insights --monitor-days 30 --baseline-window-days 30 --feature-workers 8 --skip-transcripts --output latest_run.json
+```
+
+Backfill local de transcript para filas recientes, `skipped` o bloqueadas en Supabase:
+
+```bash
+yt-transcript-backfill --monitor-days 30 --feature-workers 8 --output transcript_backfill.json
+```
+
 Compatibilidad legacy:
 
 ```bash
 python youtube_channel_scraper.py --monitor-days 30 --baseline-window-days 30 --feature-workers 8 --output latest_run.json
 python youtube_transcript_fetcher.py <youtube_url_o_id>
+python youtube_transcript_backfill.py --monitor-days 30 --feature-workers 8 --output transcript_backfill.json
 python thumbnail_test.py <thumbnail_url_o_path>
 ```
 
@@ -129,6 +144,8 @@ Notas operativas:
 - Los tests se ejecutan en lanzamientos manuales; en las ejecuciones programadas se prioriza la ingesta automatica.
 - Si quieres cambiar frecuencia o ventana de analisis, modifica el cron o las variables del repositorio sin tocar el codigo Python.
 - `--feature-workers` controla el paralelismo del enriquecimiento por video. El valor por defecto es `8`.
+- `--skip-transcripts` desactiva la extracción de transcript en batch. El workflow de GitHub Actions lo usa siempre para evitar `request_blocked` e `ip_blocked`.
+- `yt-transcript-backfill` y `youtube_transcript_backfill.py` reintentan transcript para videos recientes con estado `pending`, `skipped` o bloqueado.
 
 ## Limitaciones actuales
 

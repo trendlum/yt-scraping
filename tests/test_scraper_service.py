@@ -116,6 +116,11 @@ class FakeTranscriptExtractor:
         )
 
 
+class FailingTranscriptExtractor:
+    def extract_from_video_id(self, video_id: str) -> TranscriptFeatures:
+        raise AssertionError("transcript extraction should not be called")
+
+
 def test_merge_unique_video_ids_preserves_order() -> None:
     assert merge_unique_video_ids(["a", "b"], ["b", "c"]) == ["a", "b", "c"]
 
@@ -169,6 +174,27 @@ def test_run_batch_scrape_skips_thumbnail_analysis_when_disabled() -> None:
     assert all(row["thumbnail_feature_status"] == "skipped" for row in repo.feature_rows)
     assert all(row["thumbnail_ocr_status"] == "skipped" for row in repo.feature_rows)
     assert all(row["thumbnail_text"] is None for row in repo.feature_rows)
+
+
+def test_run_batch_scrape_can_skip_transcript_analysis() -> None:
+    repo = FakeRepository()
+    transcript_extractor = FailingTranscriptExtractor()
+
+    run_batch_scrape(
+        FakeYouTubeClient(),
+        repo,
+        limit=10,
+        monitor_days=30,
+        baseline_window_days=30,
+        feature_workers=1,
+        should_analyze_transcript=False,
+        executed_at=datetime(2026, 4, 13, tzinfo=timezone.utc),
+        transcript_extractor=transcript_extractor,
+    )
+
+    assert len(repo.feature_rows) == 2
+    assert all(row["transcript_status"] == "skipped" for row in repo.feature_rows)
+    assert all(row["transcript_text"] is None for row in repo.feature_rows)
 
 
 def test_run_batch_scrape_supports_parallel_feature_enrichment() -> None:

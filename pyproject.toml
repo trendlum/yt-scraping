@@ -24,6 +24,7 @@ dev = [
 [project.scripts]
 yt-insights = "yt_insights.cli:main"
 yt-transcript-fetcher = "yt_insights.tools.transcript_fetcher_script:main"
+yt-transcript-backfill = "yt_insights.tools.transcript_backfill_script:main"
 yt-thumbnail-debug = "yt_insights.tools.thumbnail_debug:main"
 
 [tool.setuptools.packages.find]

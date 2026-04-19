@@ -60,6 +60,12 @@ def build_argument_parser() -> argparse.ArgumentParser:
         help="Maximum worker threads used to enrich transcripts and thumbnails.",
     )
     parser.add_argument(
+        "--skip-transcripts",
+        action="store_true",
+        default=os.getenv("GITHUB_ACTIONS", "").lower() == "true",
+        help="Disable transcript enrichment in batch mode.",
+    )
+    parser.add_argument(
         "--log-level",
         default="INFO",
         help="Python logging level. Example: INFO, DEBUG, WARNING.",
@@ -112,6 +118,7 @@ def main() -> int:
                 monitor_days=args.monitor_days,
                 baseline_window_days=args.baseline_window_days,
                 feature_workers=args.feature_workers,
+                should_analyze_transcript=not args.skip_transcripts,
             )
     except (ConfigurationError, YouTubeAPIError, SupabaseAPIError, ValueError) as exc:
         raise SystemExit(str(exc)) from exc
