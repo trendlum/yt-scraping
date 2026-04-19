@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+import os
 import logging
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta
+from typing import Any
 
 from ..analytics.performance import build_performance_records
 from ..analytics.transcript_features import TranscriptFeatureExtractor, enrich_transcript_features
@@ -9,7 +12,12 @@ from ..analytics.thumbnail_features import ThumbnailFeatureExtractor, enrich_thu
 from ..analytics.title_features import extract_title_features
 from ..clients.supabase import SupabaseClient
 from ..clients.youtube import YouTubeClient
-from ..constants import DEFAULT_BASELINE_WINDOW_DAYS, DEFAULT_MONITOR_DAYS, DEFAULT_TIMEOUT
+from ..constants import (
+    DEFAULT_BASELINE_WINDOW_DAYS,
+    DEFAULT_FEATURE_WORKERS,
+    DEFAULT_MONITOR_DAYS,
+    DEFAULT_TIMEOUT,
+)
 from ..exceptions import YouTubeAPIError
 from ..models import ChannelScrapeResult, utc_now
 from ..repositories.supabase import SupabaseRepository
@@ -75,6 +83,85 @@ def scrape_channel_for_monitoring(
     )
 
 
+def _resolve_feature_workers(feature_workers: int | None) -> int:
+    if feature_workers is None:
+        return DEFAULT_FEATURE_WORKERS
+    return max(1, feature_workers)
+
+
+def _build_feature_row(
+    video: Any,
+    channel_handle: str,
+    run_started_at: datetime,
+    should_analyze_thumbnail: bool,
+    transcript_extractor: TranscriptFeatureExtractor,
+    thumbnail_extractor: ThumbnailFeatureExtractor,
+) -> dict:
+    feature_record = extract_title_features(
+        video,
+        channel_handle,
+        extracted_at=run_started_at,
+    )
+    feature_record = enrich_transcript_features(feature_record, transcript_extractor)
+    if should_analyze_thumbnail:
+        feature_record = enrich_thumbnail_features(feature_record, thumbnail_extractor)
+    else:
+        feature_record.thumbnail_feature_status = "skipped"
+        feature_record.thumbnail_ocr_status = "skipped"
+        feature_record.has_thumbnail_text = None
+        feature_record.estimated_thumbnail_text_tokens = None
+        feature_record.thumbnail_text = None
+        feature_record.thumbnail_text_confidence = None
+    return feature_record.to_row()
+
+
+def _parallel_feature_rows(
+    channel_result: ChannelScrapeResult,
+    *,
+    channel_handle: str,
+    run_started_at: datetime,
+    should_analyze_thumbnail: bool,
+    feature_workers: int,
+    transcript_extractor_factory: Any,
+    thumbnail_extractor_factory: Any,
+) -> list[dict]:
+    videos = channel_result.videos
+    if not videos:
+        return []
+
+    if feature_workers <= 1 or len(videos) == 1:
+        transcript_extractor = transcript_extractor_factory()
+        thumbnail_extractor = thumbnail_extractor_factory()
+        return [
+            _build_feature_row(
+                video,
+                channel_handle,
+                run_started_at,
+                should_analyze_thumbnail,
+                transcript_extractor,
+                thumbnail_extractor,
+            )
+            for video in videos
+        ]
+
+    max_workers = min(feature_workers, len(videos), max(1, (os.cpu_count() or 1) * 4))
+
+    def build_row(video: Any) -> dict:
+        transcript_extractor = transcript_extractor_factory()
+        thumbnail_extractor = thumbnail_extractor_factory()
+        return _build_feature_row(
+            video,
+            channel_handle,
+            run_started_at,
+            should_analyze_thumbnail,
+            transcript_extractor,
+            thumbnail_extractor,
+        )
+
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        return list(executor.map(build_row, videos))
+
+
 def run_batch_scrape(
     youtube_client: YouTubeClient,
     repository: SupabaseRepository,
@@ -82,6 +169,7 @@ def run_batch_scrape(
     limit: int | None,
     monitor_days: int = DEFAULT_MONITOR_DAYS,
     baseline_window_days: int = DEFAULT_BASELINE_WINDOW_DAYS,
+    feature_workers: int | None = DEFAULT_FEATURE_WORKERS,
     executed_at: datetime | None = None,
     transcript_extractor: TranscriptFeatureExtractor | None = None,
     thumbnail_extractor: ThumbnailFeatureExtractor | None = None,
@@ -89,22 +177,37 @@ def run_batch_scrape(
     run_started_at = executed_at or utc_now()
     monitor_cutoff = run_started_at - timedelta(days=monitor_days)
     analytics_cutoff = run_started_at - timedelta(days=baseline_window_days)
-    channel_handles = repository.get_active_channel_handles()
+    channel_configs = repository.get_active_channel_configs()
 
     results: list[ChannelScrapeResult] = []
     current_rows: list[dict] = []
     snapshot_rows: list[dict] = []
     feature_rows: list[dict] = []
     errors: list[str] = []
-    thumbnail_extractor = thumbnail_extractor or ThumbnailFeatureExtractor(
-        timeout=getattr(youtube_client, "timeout", DEFAULT_TIMEOUT)
-    )
-    transcript_extractor = transcript_extractor or TranscriptFeatureExtractor(
-        timeout=getattr(youtube_client, "timeout", DEFAULT_TIMEOUT),
-        session=getattr(youtube_client, "session", None),
-    )
+    feature_workers = _resolve_feature_workers(feature_workers)
+    timeout = getattr(youtube_client, "timeout", DEFAULT_TIMEOUT)
+    youtube_session = getattr(youtube_client, "session", None)
 
-    for handle in channel_handles:
+    if thumbnail_extractor is None:
+        def thumbnail_extractor_factory() -> ThumbnailFeatureExtractor:
+            return ThumbnailFeatureExtractor(timeout=timeout)
+    else:
+        def thumbnail_extractor_factory() -> ThumbnailFeatureExtractor:
+            return thumbnail_extractor
+
+    if transcript_extractor is None:
+        def transcript_extractor_factory() -> TranscriptFeatureExtractor:
+            return TranscriptFeatureExtractor(
+                timeout=timeout,
+                session=youtube_session,
+            )
+    else:
+        def transcript_extractor_factory() -> TranscriptFeatureExtractor:
+            return transcript_extractor
+
+    for channel_config in channel_configs:
+        handle = channel_config["channel_handle"]
+        should_analyze_thumbnail = channel_config["thumbnail_analysis"]
         LOGGER.info("Scraping channel %s", handle)
         try:
             channel_result = scrape_channel_for_monitoring(
@@ -123,14 +226,17 @@ def run_batch_scrape(
         for video in channel_result.videos:
             current_rows.append(video.to_current_row(handle, run_started_at))
             snapshot_rows.append(video.to_snapshot_row(handle, run_started_at))
-            feature_record = extract_title_features(
-                video,
-                handle,
-                extracted_at=run_started_at,
+        feature_rows.extend(
+            _parallel_feature_rows(
+                channel_result,
+                channel_handle=handle,
+                run_started_at=run_started_at,
+                should_analyze_thumbnail=should_analyze_thumbnail,
+                feature_workers=feature_workers,
+                transcript_extractor_factory=transcript_extractor_factory,
+                thumbnail_extractor_factory=thumbnail_extractor_factory,
             )
-            feature_record = enrich_transcript_features(feature_record, transcript_extractor)
-            feature_record = enrich_thumbnail_features(feature_record, thumbnail_extractor)
-            feature_rows.append(feature_record.to_row())
+        )
 
     if not results:
         raise YouTubeAPIError(
@@ -195,6 +301,7 @@ def scrape_and_store_channels(
     timeout: int = DEFAULT_TIMEOUT,
     monitor_days: int = DEFAULT_MONITOR_DAYS,
     baseline_window_days: int = DEFAULT_BASELINE_WINDOW_DAYS,
+    feature_workers: int | None = DEFAULT_FEATURE_WORKERS,
 ) -> list[dict]:
     youtube_client = YouTubeClient(api_key, timeout=timeout)
     repository = SupabaseRepository(
@@ -210,4 +317,5 @@ def scrape_and_store_channels(
         limit=limit,
         monitor_days=monitor_days,
         baseline_window_days=baseline_window_days,
+        feature_workers=feature_workers,
     )

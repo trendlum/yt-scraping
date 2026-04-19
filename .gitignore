@@ -4,5 +4,7 @@ __pycache__
 *.pyc
 build
 latest_run.json
+*_transcript.json
 yt_insights.egg-info
 sql/
+.venv

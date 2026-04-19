@@ -138,11 +138,14 @@ class ThumbnailFeatureExtractor:
     def extract_from_image(self, image: np.ndarray) -> ThumbnailImageFeatures:
         resized = _resize_for_analysis(image)
         face_count = _detect_faces(resized, self.face_cascade)
-        has_text, estimated_tokens = _detect_text_like_regions(resized)
         thumbnail_text, thumbnail_text_confidence, ocr_status = self._extract_thumbnail_text(image)
-        if thumbnail_text:
-            has_text = True
-            estimated_tokens = max(estimated_tokens, len(_THUMBNAIL_WORD_RE.findall(thumbnail_text)))
+        has_text = thumbnail_text is not None
+        if not has_text:
+            thumbnail_text = None
+            thumbnail_text_confidence = None
+            estimated_tokens = 0
+        else:
+            estimated_tokens = len(_THUMBNAIL_WORD_RE.findall(thumbnail_text))
         dominant_colors = _extract_dominant_colors(resized)
         composition_type = _estimate_composition(resized)
         contains_chart = _detect_chart_like_layout(resized, has_text, face_count)
@@ -165,7 +168,10 @@ class ThumbnailFeatureExtractor:
             visual_style=visual_style,
         )
 
-    def _extract_thumbnail_text(self, image: np.ndarray) -> tuple[str | None, float | None, str]:
+    def _extract_thumbnail_text(
+        self,
+        image: np.ndarray,
+    ) -> tuple[str | None, float | None, str]:
         reader = self._get_ocr_reader()
         if reader is None:
             return None, None, "not_available"
@@ -272,51 +278,6 @@ def _detect_faces(image: np.ndarray, face_cascade: cv2.CascadeClassifier) -> int
         minSize=(24, 24),
     )
     return int(len(faces))
-
-
-def _detect_text_like_regions(image: np.ndarray) -> tuple[bool, int]:
-    grayscale = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-    gradient = cv2.Sobel(grayscale, cv2.CV_32F, 1, 0, ksize=3)
-    gradient = cv2.convertScaleAbs(gradient)
-    blurred = cv2.GaussianBlur(gradient, (3, 3), 0)
-    _, binary = cv2.threshold(
-        blurred,
-        0,
-        255,
-        cv2.THRESH_BINARY + cv2.THRESH_OTSU,
-    )
-    grouped = cv2.morphologyEx(
-        binary,
-        cv2.MORPH_CLOSE,
-        cv2.getStructuringElement(cv2.MORPH_RECT, (21, 5)),
-    )
-    grouped = cv2.dilate(grouped, cv2.getStructuringElement(cv2.MORPH_RECT, (5, 3)), iterations=1)
-
-    contours, _ = cv2.findContours(grouped, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-    image_area = image.shape[0] * image.shape[1]
-    token_estimate = 0
-    accepted_regions = 0
-
-    for contour in contours:
-        x, y, width, height = cv2.boundingRect(contour)
-        box_area = width * height
-        area_ratio = box_area / float(image_area)
-        aspect_ratio = width / float(max(height, 1))
-        if area_ratio < 0.004 or area_ratio > 0.35:
-            continue
-        if aspect_ratio < 1.6 or width < image.shape[1] * 0.14 or height > image.shape[0] * 0.38:
-            continue
-
-        region = grouped[y : y + height, x : x + width]
-        density = float(np.count_nonzero(region)) / float(max(box_area, 1))
-        if density < 0.08 or density > 0.9:
-            continue
-
-        accepted_regions += 1
-        token_estimate += max(1, round(width / 32))
-
-    token_estimate = int(min(token_estimate, 24))
-    return accepted_regions > 0, token_estimate
 
 
 def _extract_dominant_colors(image: np.ndarray, top_k: int = 3) -> list[str]:

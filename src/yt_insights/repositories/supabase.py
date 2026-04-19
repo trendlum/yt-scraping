@@ -17,17 +17,27 @@ class SupabaseRepository:
     def __init__(self, client: SupabaseClient) -> None:
         self.client = client
 
-    def get_active_channel_handles(self) -> list[str]:
+    def get_active_channel_configs(self) -> list[dict[str, Any]]:
         payload = self.client.request(
             "GET",
             "yt_channels",
             params={
-                "select": "channel_handle",
+                "select": "channel_handle,thumbnail_analysis",
                 "is_active": "eq.true",
                 "order": "id.asc",
             },
         )
-        return [row["channel_handle"] for row in payload or [] if row.get("channel_handle")]
+        return [
+            {
+                "channel_handle": row["channel_handle"],
+                "thumbnail_analysis": bool(row.get("thumbnail_analysis")),
+            }
+            for row in payload or []
+            if row.get("channel_handle")
+        ]
+
+    def get_active_channel_handles(self) -> list[str]:
+        return [row["channel_handle"] for row in self.get_active_channel_configs()]
 
     def get_last_scraper_run(self, scraper_name: str = SCRAPER_STATE_NAME) -> datetime | None:
         payload = self.client.request(

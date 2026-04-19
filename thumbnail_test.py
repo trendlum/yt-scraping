@@ -6,4 +6,4 @@ SRC_PATH = ROOT / "src"
 if str(SRC_PATH) not in sys.path:
     sys.path.insert(0, str(SRC_PATH))
 
-from yt_insights.tools.scraper_script import *  # noqa: F403
+from yt_insights.tools.thumbnail_debug import *  # noqa: F403

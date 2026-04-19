@@ -12,6 +12,7 @@ dependencies = [
   "easyocr>=1.7,<2",
   "numpy>=2.0,<3",
   "opencv-python-headless>=4.10,<5",
+  "youtube-transcript-api>=1.2.4,<2",
   "requests>=2.31,<3",
 ]
 
@@ -19,6 +20,11 @@ dependencies = [
 dev = [
   "pytest>=8,<9",
 ]
+
+[project.scripts]
+yt-insights = "yt_insights.cli:main"
+yt-transcript-fetcher = "yt_insights.tools.transcript_fetcher_script:main"
+yt-thumbnail-debug = "yt_insights.tools.thumbnail_debug:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]

@@ -19,6 +19,11 @@ on:
         required: false
         default: "30"
         type: string
+      feature_workers:
+        description: "Worker threads used for transcript and thumbnail enrichment"
+        required: false
+        default: "8"
+        type: string
 
 permissions:
   contents: read
@@ -38,9 +43,11 @@ jobs:
       SCRAPER_LIMIT: ${{ inputs.limit }}
       SCRAPER_MONITOR_DAYS: ${{ inputs.monitor_days }}
       SCRAPER_BASELINE_WINDOW_DAYS: ${{ inputs.baseline_window_days }}
+      SCRAPER_FEATURE_WORKERS: ${{ inputs.feature_workers }}
       DEFAULT_LIMIT: ${{ vars.SCRAPER_DEFAULT_LIMIT }}
       DEFAULT_MONITOR_DAYS: ${{ vars.SCRAPER_DEFAULT_MONITOR_DAYS }}
       DEFAULT_BASELINE_WINDOW_DAYS: ${{ vars.SCRAPER_DEFAULT_BASELINE_WINDOW_DAYS }}
+      DEFAULT_FEATURE_WORKERS: ${{ vars.SCRAPER_DEFAULT_FEATURE_WORKERS }}
       SCRAPER_LOG_LEVEL: ${{ vars.SCRAPER_LOG_LEVEL }}
     steps:
       - name: Checkout repository
@@ -73,9 +80,10 @@ jobs:
           LIMIT="${SCRAPER_LIMIT:-${DEFAULT_LIMIT:-}}"
           MONITOR_DAYS="${SCRAPER_MONITOR_DAYS:-${DEFAULT_MONITOR_DAYS:-30}}"
           BASELINE_WINDOW_DAYS="${SCRAPER_BASELINE_WINDOW_DAYS:-${DEFAULT_BASELINE_WINDOW_DAYS:-30}}"
+          FEATURE_WORKERS="${SCRAPER_FEATURE_WORKERS:-${DEFAULT_FEATURE_WORKERS:-8}}"
           LOG_LEVEL="${SCRAPER_LOG_LEVEL:-INFO}"
 
-          CMD=(python -m yt_insights --output latest_run.json --monitor-days "$MONITOR_DAYS" --baseline-window-days "$BASELINE_WINDOW_DAYS" --log-level "$LOG_LEVEL")
+          CMD=(python -m yt_insights --output latest_run.json --monitor-days "$MONITOR_DAYS" --baseline-window-days "$BASELINE_WINDOW_DAYS" --feature-workers "$FEATURE_WORKERS" --log-level "$LOG_LEVEL")
           if [ -n "${LIMIT:-}" ]; then
             CMD+=(--limit "$LIMIT")
           fi

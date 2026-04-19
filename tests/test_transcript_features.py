@@ -1,80 +1,58 @@
 from __future__ import annotations
 
-from yt_insights.analytics.transcript_features import TranscriptFeatureExtractor
+from unittest.mock import patch
+
+from yt_insights.analytics.transcript_features import TranscriptFeatureExtractor, TranscriptFeatures
+from yt_insights.transcript_cli import TranscriptResult, TranscriptSegment, TranscriptNotAvailableError, VideoUnavailableError
 
 
-class FakeResponse:
-    def __init__(self, *, text: str, json_data: dict | None = None, status_code: int = 200) -> None:
-        self.text = text
-        self._json_data = json_data
-        self.status_code = status_code
+def test_transcript_extractor_maps_fetched_transcript_to_complete_features() -> None:
+    extractor = TranscriptFeatureExtractor()
 
-    def raise_for_status(self) -> None:
-        if self.status_code >= 400:
-            raise RuntimeError(f"status {self.status_code}")
+    with patch("yt_insights.analytics.transcript_features.create_youtube_transcript_api") as mocked_api, patch(
+        "yt_insights.analytics.transcript_features.fetch_transcript"
+    ) as mocked_fetch:
+        mocked_api.return_value = object()
+        mocked_fetch.return_value = TranscriptResult(
+            video_id="video-1",
+            language_code="en",
+            language="English",
+            is_generated=True,
+            full_text="Hello world",
+            segments=[TranscriptSegment(start=0.0, duration=1.0, text="Hello world")],
+        )
 
-    def json(self):
-        if self._json_data is None:
-            raise ValueError("invalid json")
-        return self._json_data
-
-
-class FakeSession:
-    def __init__(self, responses: dict[str, FakeResponse]) -> None:
-        self.responses = responses
-        self.requested_urls: list[str] = []
-
-    def get(self, url: str, timeout: int):
-        self.requested_urls.append(url)
-        for key, response in self.responses.items():
-            if key in url:
-                return response
-        raise RuntimeError(f"unexpected url: {url}")
-
-
-def test_transcript_extractor_reads_caption_tracks_and_flattens_json3_payload() -> None:
-    html = """
-        <html>
-        <script>
-        var ytInitialPlayerResponse = {"captions":{"playerCaptionsTracklistRenderer":{"captionTracks":[{"baseUrl":"https://example.com/captions?id=123","languageCode":"en","kind":"asr"}]}}};
-        </script>
-        </html>
-    """
-    transcript_payload = {
-        "events": [
-            {"segs": [{"utf8": "Hello "}, {"utf8": "world"}]},
-            {"segs": [{"utf8": "This is a test"}]},
-        ]
-    }
-    session = FakeSession(
-        {
-            "watch?v=video-1": FakeResponse(text=html),
-            "example.com/captions": FakeResponse(text="", json_data=transcript_payload),
-        }
-    )
-    extractor = TranscriptFeatureExtractor(session=session)
-
-    features = extractor.extract_from_video_id("video-1")
+        features = extractor.extract_from_video_id("video-1")
 
     assert features.status == "complete"
     assert features.language == "en"
     assert features.is_auto_generated is True
-    assert features.transcript_text == "Hello world\nThis is a test"
-    assert len(session.requested_urls) == 2
+    assert features.transcript_text == "Hello world"
 
 
-def test_transcript_extractor_returns_no_captions_when_page_has_none() -> None:
-    html = """
-        <html>
-        <script>
-        var ytInitialPlayerResponse = {"captions":{}};
-        </script>
-        </html>
-    """
-    session = FakeSession({"watch?v=video-2": FakeResponse(text=html)})
-    extractor = TranscriptFeatureExtractor(session=session)
+def test_transcript_extractor_returns_no_captions_when_no_transcript_exists() -> None:
+    extractor = TranscriptFeatureExtractor()
 
-    features = extractor.extract_from_video_id("video-2")
+    with patch("yt_insights.analytics.transcript_features.create_youtube_transcript_api") as mocked_api, patch(
+        "yt_insights.analytics.transcript_features.fetch_transcript",
+        side_effect=TranscriptNotAvailableError(),
+    ):
+        mocked_api.return_value = object()
+        features = extractor.extract_from_video_id("video-2")
 
     assert features.status == "no_captions"
+    assert features.transcript_text is None
+
+
+def test_transcript_extractor_returns_video_unavailable_status() -> None:
+    extractor = TranscriptFeatureExtractor()
+
+    with patch("yt_insights.analytics.transcript_features.create_youtube_transcript_api") as mocked_api, patch(
+        "yt_insights.analytics.transcript_features.fetch_transcript",
+        side_effect=VideoUnavailableError(),
+    ):
+        mocked_api.return_value = object()
+        features = extractor.extract_from_video_id("video-3")
+
+    assert features.status == "video_unavailable"
     assert features.transcript_text is None

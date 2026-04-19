@@ -2,6 +2,7 @@ YOUTUBE_API_BASE_URL = "https://www.googleapis.com/youtube/v3"
 DEFAULT_TIMEOUT = 20
 DEFAULT_MONITOR_DAYS = 30
 DEFAULT_BASELINE_WINDOW_DAYS = 30
+DEFAULT_FEATURE_WORKERS = 8
 THUMBNAIL_PRIORITY = ("maxres", "standard", "high", "medium", "default")
 SCRAPER_STATE_NAME = "youtube_channel_scraper"
 VIDEO_FEATURES_EXTRACTOR_VERSION = "video_features_v4"

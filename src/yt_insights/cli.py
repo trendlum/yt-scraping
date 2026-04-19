@@ -7,7 +7,12 @@ from pathlib import Path
 from typing import Any
 
 from .config import load_dotenv
-from .constants import DEFAULT_BASELINE_WINDOW_DAYS, DEFAULT_MONITOR_DAYS, DEFAULT_TIMEOUT
+from .constants import (
+    DEFAULT_BASELINE_WINDOW_DAYS,
+    DEFAULT_FEATURE_WORKERS,
+    DEFAULT_MONITOR_DAYS,
+    DEFAULT_TIMEOUT,
+)
 from .exceptions import ConfigurationError, SupabaseAPIError, YouTubeAPIError
 from .logging import configure_logging
 from .services.scraper import scrape_and_store_channels, scrape_channel_latest_videos
@@ -47,6 +52,12 @@ def build_argument_parser() -> argparse.ArgumentParser:
         type=int,
         default=DEFAULT_BASELINE_WINDOW_DAYS,
         help="Publication window used to build per-channel baselines.",
+    )
+    parser.add_argument(
+        "--feature-workers",
+        type=int,
+        default=DEFAULT_FEATURE_WORKERS,
+        help="Maximum worker threads used to enrich transcripts and thumbnails.",
     )
     parser.add_argument(
         "--log-level",
@@ -100,6 +111,7 @@ def main() -> int:
                 timeout=args.timeout,
                 monitor_days=args.monitor_days,
                 baseline_window_days=args.baseline_window_days,
+                feature_workers=args.feature_workers,
             )
     except (ConfigurationError, YouTubeAPIError, SupabaseAPIError, ValueError) as exc:
         raise SystemExit(str(exc)) from exc

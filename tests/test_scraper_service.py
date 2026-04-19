@@ -49,8 +49,8 @@ class FakeRepository:
         self.performance_rows: list[dict] = []
         self.updated_at = None
 
-    def get_active_channel_handles(self) -> list[str]:
-        return ["@channel"]
+    def get_active_channel_configs(self) -> list[dict]:
+        return [{"channel_handle": "@channel", "thumbnail_analysis": True}]
 
     def get_recent_video_ids(self, channel_handle: str, *, published_after, limit: int = 200) -> list[str]:
         return ["stored-video"]
@@ -79,7 +79,11 @@ class FakeRepository:
 
 
 class FakeTranscriptExtractor:
+    def __init__(self) -> None:
+        self.calls = 0
+
     def extract_from_video_id(self, video_id: str) -> TranscriptFeatures:
+        self.calls += 1
         return TranscriptFeatures(
             status="complete",
             language="en",
@@ -100,6 +104,7 @@ def test_run_batch_scrape_persists_current_rows_snapshots_and_features() -> None
         limit=10,
         monitor_days=30,
         baseline_window_days=30,
+        feature_workers=1,
         executed_at=datetime(2026, 4, 13, tzinfo=timezone.utc),
         transcript_extractor=FakeTranscriptExtractor(),
     )
@@ -114,3 +119,57 @@ def test_run_batch_scrape_persists_current_rows_snapshots_and_features() -> None
     assert all(row["thumbnail_feature_status"] == "no_thumbnail" for row in repo.feature_rows)
     assert all(row["thumbnail_ocr_status"] == "no_thumbnail" for row in repo.feature_rows)
     assert repo.updated_at == datetime(2026, 4, 13, tzinfo=timezone.utc)
+
+
+def test_run_batch_scrape_skips_thumbnail_analysis_when_disabled() -> None:
+    class DisabledThumbnailRepository(FakeRepository):
+        def get_active_channel_configs(self) -> list[dict]:
+            return [{"channel_handle": "@channel", "thumbnail_analysis": False}]
+
+    repo = DisabledThumbnailRepository()
+    thumbnail_extractor = FakeThumbnailExtractor()
+    result = run_batch_scrape(
+        FakeYouTubeClient(),
+        repo,
+        limit=10,
+        monitor_days=30,
+        baseline_window_days=30,
+        feature_workers=1,
+        executed_at=datetime(2026, 4, 13, tzinfo=timezone.utc),
+        transcript_extractor=FakeTranscriptExtractor(),
+        thumbnail_extractor=thumbnail_extractor,
+    )
+
+    assert len(result) == 1
+    assert thumbnail_extractor.calls == 0
+    assert all(row["thumbnail_feature_status"] == "skipped" for row in repo.feature_rows)
+    assert all(row["thumbnail_ocr_status"] == "skipped" for row in repo.feature_rows)
+    assert all(row["thumbnail_text"] is None for row in repo.feature_rows)
+
+
+def test_run_batch_scrape_supports_parallel_feature_enrichment() -> None:
+    repo = FakeRepository()
+    result = run_batch_scrape(
+        FakeYouTubeClient(),
+        repo,
+        limit=10,
+        monitor_days=30,
+        baseline_window_days=30,
+        feature_workers=4,
+        executed_at=datetime(2026, 4, 13, tzinfo=timezone.utc),
+        transcript_extractor=FakeTranscriptExtractor(),
+    )
+
+    assert len(result) == 1
+    assert len(repo.feature_rows) == 2
+    assert {row["video_id"] for row in repo.feature_rows} == {"new-video", "stored-video"}
+    assert all(row["transcript_status"] == "complete" for row in repo.feature_rows)
+
+
+class FakeThumbnailExtractor:
+    def __init__(self) -> None:
+        self.calls = 0
+
+    def extract_from_url(self, thumbnail_url):
+        self.calls += 1
+        raise AssertionError("thumbnail extraction should not be called")

@@ -55,6 +55,18 @@ def test_thumbnail_extractor_detects_text_regions_and_colors() -> None:
     assert features.visual_style in {"graphic", "mixed", "simple"}
 
 
+def test_thumbnail_extractor_marks_no_text_when_ocr_finds_nothing() -> None:
+    extractor = ThumbnailFeatureExtractor(ocr_reader=FakeOCRReader([]))
+    features = extractor.extract_from_image(_build_text_thumbnail())
+
+    assert features.status == "complete"
+    assert features.ocr_status == "no_text"
+    assert features.has_thumbnail_text is False
+    assert features.estimated_thumbnail_text_tokens == 0
+    assert features.thumbnail_text is None
+    assert features.thumbnail_text_confidence is None
+
+
 def test_thumbnail_extractor_handles_invalid_bytes() -> None:
     extractor = ThumbnailFeatureExtractor()
     features = extractor.extract_from_bytes(b"not-an-image")

@@ -12,6 +12,7 @@ Refactor incremental del scraper actual hacia una herramienta de análisis de re
 - Extrae transcript si hay captions disponibles y lo guarda en `yt_video_features`.
 - Extrae features visuales v1 de thumbnail en `yt_video_features`.
 - Mantiene la CLI compatible con `python youtube_channel_scraper.py`.
+- Expone entrypoints ordenados dentro del paquete y scripts de compatibilidad en la raiz.
 
 ## Estructura
 
@@ -21,10 +22,13 @@ src/yt_insights/
   clients/
   repositories/
   services/
+  tools/
   cli.py
 tests/
 sql/
 youtube_channel_scraper.py
+youtube_transcript_fetcher.py
+thumbnail_test.py
 ```
 
 ## Setup local
@@ -65,13 +69,21 @@ Se asume que ya existen:
 Canal puntual:
 
 ```bash
-python youtube_channel_scraper.py --channel-handle @handle --limit 10
+python -m yt_insights --channel-handle @handle --limit 10
 ```
 
 Batch con persistencia y analytics:
 
 ```bash
-python youtube_channel_scraper.py --monitor-days 30 --baseline-window-days 30 --output latest_run.json
+python -m yt_insights --monitor-days 30 --baseline-window-days 30 --feature-workers 8 --output latest_run.json
+```
+
+Compatibilidad legacy:
+
+```bash
+python youtube_channel_scraper.py --monitor-days 30 --baseline-window-days 30 --feature-workers 8 --output latest_run.json
+python youtube_transcript_fetcher.py <youtube_url_o_id>
+python thumbnail_test.py <thumbnail_url_o_path>
 ```
 
 ## Semántica batch v1
@@ -108,6 +120,7 @@ Repository variables opcionales:
 - `SCRAPER_DEFAULT_LIMIT`
 - `SCRAPER_DEFAULT_MONITOR_DAYS`
 - `SCRAPER_DEFAULT_BASELINE_WINDOW_DAYS`
+- `SCRAPER_DEFAULT_FEATURE_WORKERS`
 - `SCRAPER_LOG_LEVEL`
 
 Notas operativas:
@@ -115,6 +128,7 @@ Notas operativas:
 - El cron de GitHub Actions esta en UTC. El workflow usa `17 */6 * * *`.
 - Los tests se ejecutan en lanzamientos manuales; en las ejecuciones programadas se prioriza la ingesta automatica.
 - Si quieres cambiar frecuencia o ventana de analisis, modifica el cron o las variables del repositorio sin tocar el codigo Python.
+- `--feature-workers` controla el paralelismo del enriquecimiento por video. El valor por defecto es `8`.
 
 ## Limitaciones actuales
 
