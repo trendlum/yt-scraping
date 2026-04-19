@@ -48,6 +48,14 @@ class TranscriptNetworkError(TranscriptError):
     """Raised when the underlying network request fails."""
 
 
+class TranscriptRequestBlockedError(TranscriptNetworkError):
+    """Raised when YouTube blocks transcript requests from the current IP."""
+
+
+class TranscriptIpBlockedError(TranscriptNetworkError):
+    """Raised when YouTube blocks the current IP from transcript access."""
+
+
 class TranscriptDependencyError(TranscriptError):
     """Raised when the youtube-transcript-api dependency is missing."""
 
@@ -102,10 +110,14 @@ def fetch_transcript(video_id: str, api: Any | None = None) -> TranscriptResult:
             exc, "NoTranscriptFound"
         ):
             raise TranscriptNotAvailableError(f"No transcript available for video {video_id}") from exc
-        if _is_youtube_transcript_exception(exc, "RequestBlocked") or _is_youtube_transcript_exception(
-            exc, "IpBlocked"
-        ):
-            raise TranscriptNetworkError(f"Network error while fetching transcript for {video_id}: {exc}") from exc
+        if _is_youtube_transcript_exception(exc, "RequestBlocked"):
+            raise TranscriptRequestBlockedError(
+                f"Transcript request blocked for {video_id}: {exc}"
+            ) from exc
+        if _is_youtube_transcript_exception(exc, "IpBlocked"):
+            raise TranscriptIpBlockedError(
+                f"Transcript IP blocked for {video_id}: {exc}"
+            ) from exc
         raise
 
     segments = _segments_from_fetched_transcript(fetched)

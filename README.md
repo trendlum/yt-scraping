@@ -134,7 +134,7 @@ Notas operativas:
 
 - `dominant_emotion` sigue sin extraerse; permanece `null`.
 - `thumbnail_text` depende de `easyocr`; en la primera ejecucion puede necesitar descargar modelos. Usa `thumbnail_ocr_status` para distinguir `extracted`, `no_text`, `not_available`, `failed`, `no_thumbnail`, `download_failed` y `decode_failed`.
-- El transcript depende de que YouTube exponga captions en la pagina del video; si no existen, la fila queda con `transcript_status = no_captions`.
+- El transcript depende de que YouTube exponga captions en la pagina del video. `transcript_status` distingue `complete`, `no_captions`, `video_unavailable`, `request_blocked`, `ip_blocked`, `dependency_missing` y `download_failed`.
 - `contains_chart` y `contains_map` son heurísticas conservadoras y deben revisarse con muestra real antes de usarlas para decisiones fuertes.
 - El scoring es una v1 heurística; sirve para priorizar análisis, no para automatizar decisiones finales.
 - La persistencia sigue usando la REST API de Supabase vía `requests`, no el SDK.

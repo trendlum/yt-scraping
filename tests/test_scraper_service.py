@@ -259,6 +259,73 @@ def test_run_batch_scrape_reuses_existing_features_without_reextracting() -> Non
     assert reused_row["thumbnail_text"] == "BIG MOVE"
 
 
+def test_run_batch_scrape_retries_transcript_when_previous_status_was_download_failed() -> None:
+    repo = FakeRepository()
+    repo.existing_feature_rows = {
+        "new-video": {
+            "video_id": "new-video",
+            "channel_handle": "@channel",
+            "extracted_at": "2026-04-01T00:00:00+00:00",
+            "extractor_version": "v1",
+            "title_fingerprint": "0d077777982fd2f8d38e99bca33179e46d6f3685",
+            "thumbnail_fingerprint": "da39a3ee5e6b4b0d3255bfef95601890afd80709",
+            "source_title": "Title new-video",
+            "source_thumbnail_url": None,
+            "title_length_chars": 15,
+            "title_word_count": 2,
+            "uppercase_word_count": 0,
+            "digit_count": 0,
+            "has_number": False,
+            "has_question": False,
+            "has_exclamation": False,
+            "has_year": False,
+            "has_vs": False,
+            "has_brackets": False,
+            "has_colon": False,
+            "trigger_word_count": 0,
+            "title_pattern": "statement",
+            "transcript_status": "download_failed",
+            "transcript_language": None,
+            "transcript_is_auto_generated": None,
+            "transcript_text": None,
+            "thumbnail_feature_status": "no_thumbnail",
+            "thumbnail_ocr_status": "no_thumbnail",
+            "has_face": None,
+            "face_count": None,
+            "has_thumbnail_text": None,
+            "estimated_thumbnail_text_tokens": None,
+            "thumbnail_text": None,
+            "thumbnail_text_confidence": None,
+            "dominant_emotion": None,
+            "dominant_colors": None,
+            "composition_type": None,
+            "contains_chart": None,
+            "contains_map": None,
+            "visual_style": None,
+            "updated_at": "2026-04-01T00:00:00+00:00",
+        }
+    }
+    transcript_extractor = FakeTranscriptExtractor()
+    thumbnail_extractor = CountingThumbnailExtractor()
+
+    run_batch_scrape(
+        FakeYouTubeClient(),
+        repo,
+        limit=10,
+        monitor_days=30,
+        baseline_window_days=30,
+        feature_workers=1,
+        executed_at=datetime(2026, 4, 13, tzinfo=timezone.utc),
+        transcript_extractor=transcript_extractor,
+        thumbnail_extractor=thumbnail_extractor,
+    )
+
+    assert transcript_extractor.calls == 2
+    retried_row = next(row for row in repo.feature_rows if row["video_id"] == "new-video")
+    assert retried_row["transcript_status"] == "complete"
+    assert retried_row["transcript_text"] == "Transcript for new-video"
+
+
 def test_run_batch_scrape_reuses_transcript_but_refreshes_title_features_when_title_changes() -> None:
     repo = FakeRepository()
     repo.existing_feature_rows = {
@@ -393,6 +460,73 @@ def test_run_batch_scrape_recomputes_thumbnail_only_when_thumbnail_changes() -> 
     updated_row = next(row for row in repo.feature_rows if row["video_id"] == "new-video")
     assert updated_row["source_thumbnail_url"] == "https://example.com/new.jpg"
     assert updated_row["transcript_text"] == "Existing transcript"
+
+
+def test_run_batch_scrape_retries_thumbnail_when_previous_status_was_download_failed() -> None:
+    repo = FakeRepository()
+    repo.existing_feature_rows = {
+        "new-video": {
+            "video_id": "new-video",
+            "channel_handle": "@channel",
+            "extracted_at": "2026-04-01T00:00:00+00:00",
+            "extractor_version": "v1",
+            "title_fingerprint": "0d077777982fd2f8d38e99bca33179e46d6f3685",
+            "thumbnail_fingerprint": "da39a3ee5e6b4b0d3255bfef95601890afd80709",
+            "source_title": "Title new-video",
+            "source_thumbnail_url": None,
+            "title_length_chars": 15,
+            "title_word_count": 2,
+            "uppercase_word_count": 0,
+            "digit_count": 0,
+            "has_number": False,
+            "has_question": False,
+            "has_exclamation": False,
+            "has_year": False,
+            "has_vs": False,
+            "has_brackets": False,
+            "has_colon": False,
+            "trigger_word_count": 0,
+            "title_pattern": "statement",
+            "transcript_status": "complete",
+            "transcript_language": "en",
+            "transcript_is_auto_generated": False,
+            "transcript_text": "Existing transcript",
+            "thumbnail_feature_status": "download_failed",
+            "thumbnail_ocr_status": "download_failed",
+            "has_face": None,
+            "face_count": None,
+            "has_thumbnail_text": None,
+            "estimated_thumbnail_text_tokens": None,
+            "thumbnail_text": None,
+            "thumbnail_text_confidence": None,
+            "dominant_emotion": None,
+            "dominant_colors": None,
+            "composition_type": None,
+            "contains_chart": None,
+            "contains_map": None,
+            "visual_style": None,
+            "updated_at": "2026-04-01T00:00:00+00:00",
+        }
+    }
+    transcript_extractor = FakeTranscriptExtractor()
+    thumbnail_extractor = CountingThumbnailExtractor()
+
+    run_batch_scrape(
+        FakeYouTubeClient(),
+        repo,
+        limit=10,
+        monitor_days=30,
+        baseline_window_days=30,
+        feature_workers=1,
+        executed_at=datetime(2026, 4, 13, tzinfo=timezone.utc),
+        transcript_extractor=transcript_extractor,
+        thumbnail_extractor=thumbnail_extractor,
+    )
+
+    assert transcript_extractor.calls == 1
+    assert thumbnail_extractor.calls == 2
+    retried_row = next(row for row in repo.feature_rows if row["video_id"] == "new-video")
+    assert retried_row["thumbnail_feature_status"] == "no_thumbnail"
 
 
 class FakeThumbnailExtractor:

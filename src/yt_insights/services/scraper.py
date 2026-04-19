@@ -32,6 +32,16 @@ _TRANSCRIPT_FIELDS = (
     "transcript_text",
 )
 
+_TRANSCRIPT_RETRYABLE_STATUSES = {
+    None,
+    "",
+    "pending",
+    "download_failed",
+    "request_blocked",
+    "ip_blocked",
+    "dependency_missing",
+}
+
 _THUMBNAIL_FIELDS = (
     "thumbnail_feature_status",
     "thumbnail_ocr_status",
@@ -48,6 +58,15 @@ _THUMBNAIL_FIELDS = (
     "contains_map",
     "visual_style",
 )
+
+_THUMBNAIL_RETRYABLE_STATUSES = {
+    None,
+    "",
+    "pending",
+    "download_failed",
+    "failed",
+    "decode_failed",
+}
 
 
 def merge_unique_video_ids(*video_id_groups: list[str]) -> list[str]:
@@ -164,21 +183,31 @@ def _parallel_feature_rows(
         existing_row = existing_feature_rows.get(video.video_id)
 
         if existing_row is not None:
-            for field_name in _TRANSCRIPT_FIELDS:
-                setattr(feature_record, field_name, existing_row.get(field_name))
+            transcript_status = existing_row.get("transcript_status")
+            should_reuse_transcript = transcript_status not in _TRANSCRIPT_RETRYABLE_STATUSES
+            if should_reuse_transcript:
+                for field_name in _TRANSCRIPT_FIELDS:
+                    setattr(feature_record, field_name, existing_row.get(field_name))
 
+            thumbnail_status = existing_row.get("thumbnail_feature_status")
+            should_reuse_thumbnail = thumbnail_status not in _THUMBNAIL_RETRYABLE_STATUSES
             thumbnail_unchanged = (
                 existing_row.get("thumbnail_fingerprint") == feature_record.thumbnail_fingerprint
             )
-            if thumbnail_unchanged:
+            if thumbnail_unchanged and should_reuse_thumbnail:
                 for field_name in _THUMBNAIL_FIELDS:
                     setattr(feature_record, field_name, existing_row.get(field_name))
-                return feature_record.to_row()
+                should_reuse_thumbnail = True
+            else:
+                should_reuse_thumbnail = False
+        else:
+            should_reuse_transcript = False
+            should_reuse_thumbnail = False
 
-        if should_analyze_thumbnail:
+        if not should_reuse_thumbnail and should_analyze_thumbnail:
             thumbnail_extractor = thumbnail_extractor_factory()
             feature_record = enrich_thumbnail_features(feature_record, thumbnail_extractor)
-        else:
+        elif not should_reuse_thumbnail:
             feature_record.thumbnail_feature_status = "skipped"
             feature_record.thumbnail_ocr_status = "skipped"
             feature_record.has_thumbnail_text = None
@@ -186,7 +215,7 @@ def _parallel_feature_rows(
             feature_record.thumbnail_text = None
             feature_record.thumbnail_text_confidence = None
 
-        if existing_row is None:
+        if not should_reuse_transcript:
             transcript_extractor = transcript_extractor_factory()
             feature_record = enrich_transcript_features(feature_record, transcript_extractor)
 

@@ -10,8 +10,10 @@ from ..constants import DEFAULT_TIMEOUT
 from ..models import VideoFeatureRecord
 from ..transcript_cli import (
     TranscriptDependencyError,
+    TranscriptIpBlockedError,
     TranscriptNetworkError,
     TranscriptNotAvailableError,
+    TranscriptRequestBlockedError,
     VideoUnavailableError,
     fetch_transcript,
     create_youtube_transcript_api,
@@ -57,7 +59,31 @@ class TranscriptFeatureExtractor:
                 is_auto_generated=None,
                 transcript_text=None,
             )
-        except (TranscriptNetworkError, TranscriptDependencyError) as exc:
+        except TranscriptRequestBlockedError as exc:
+            LOGGER.warning("Transcript request blocked for %s: %s", video_id, exc)
+            return TranscriptFeatures(
+                status="request_blocked",
+                language=None,
+                is_auto_generated=None,
+                transcript_text=None,
+            )
+        except TranscriptIpBlockedError as exc:
+            LOGGER.warning("Transcript IP blocked for %s: %s", video_id, exc)
+            return TranscriptFeatures(
+                status="ip_blocked",
+                language=None,
+                is_auto_generated=None,
+                transcript_text=None,
+            )
+        except TranscriptDependencyError as exc:
+            LOGGER.warning("Transcript dependency missing for %s: %s", video_id, exc)
+            return TranscriptFeatures(
+                status="dependency_missing",
+                language=None,
+                is_auto_generated=None,
+                transcript_text=None,
+            )
+        except TranscriptNetworkError as exc:
             LOGGER.warning("Transcript fetch failed for %s: %s", video_id, exc)
             return TranscriptFeatures(
                 status="download_failed",
