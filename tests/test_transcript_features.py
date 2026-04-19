@@ -11,6 +11,7 @@ from yt_insights.transcript_cli import (
     TranscriptRequestBlockedError,
     TranscriptResult,
     TranscriptSegment,
+    VideoUnplayableError,
     VideoUnavailableError,
 )
 
@@ -64,6 +65,20 @@ def test_transcript_extractor_returns_video_unavailable_status() -> None:
         features = extractor.extract_from_video_id("video-3")
 
     assert features.status == "video_unavailable"
+    assert features.transcript_text is None
+
+
+def test_transcript_extractor_returns_video_unplayable_status() -> None:
+    extractor = TranscriptFeatureExtractor()
+
+    with patch("yt_insights.analytics.transcript_features.create_youtube_transcript_api") as mocked_api, patch(
+        "yt_insights.analytics.transcript_features.fetch_transcript",
+        side_effect=VideoUnplayableError(),
+    ):
+        mocked_api.return_value = object()
+        features = extractor.extract_from_video_id("video-3b")
+
+    assert features.status == "video_unplayable"
     assert features.transcript_text is None
 
 

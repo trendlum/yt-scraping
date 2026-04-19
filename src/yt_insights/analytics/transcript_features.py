@@ -14,6 +14,7 @@ from ..transcript_cli import (
     TranscriptNetworkError,
     TranscriptNotAvailableError,
     TranscriptRequestBlockedError,
+    VideoUnplayableError,
     VideoUnavailableError,
     fetch_transcript,
     create_youtube_transcript_api,
@@ -55,6 +56,14 @@ class TranscriptFeatureExtractor:
         except VideoUnavailableError:
             return TranscriptFeatures(
                 status="video_unavailable",
+                language=None,
+                is_auto_generated=None,
+                transcript_text=None,
+            )
+        except VideoUnplayableError as exc:
+            LOGGER.warning("Transcript video unplayable for %s: %s", video_id, exc)
+            return TranscriptFeatures(
+                status="video_unplayable",
                 language=None,
                 is_auto_generated=None,
                 transcript_text=None,

@@ -22,7 +22,7 @@ on:
       feature_workers:
         description: "Worker threads used for transcript and thumbnail enrichment"
         required: false
-        default: "8"
+        default: "2"
         type: string
 
 permissions:
@@ -46,7 +46,7 @@ jobs:
       DEFAULT_LIMIT: ${{ vars.SCRAPER_DEFAULT_LIMIT }}
       DEFAULT_MONITOR_DAYS: ${{ vars.SCRAPER_DEFAULT_MONITOR_DAYS }}
       DEFAULT_BASELINE_WINDOW_DAYS: ${{ vars.SCRAPER_DEFAULT_BASELINE_WINDOW_DAYS }}
-      DEFAULT_FEATURE_WORKERS: ${{ vars.SCRAPER_DEFAULT_FEATURE_WORKERS }}
+      DEFAULT_FEATURE_WORKERS: "2"
       SCRAPER_LOG_LEVEL: ${{ vars.SCRAPER_LOG_LEVEL }}
       PIP_DISABLE_PIP_VERSION_CHECK: "1"
     steps:
@@ -86,7 +86,7 @@ jobs:
           LIMIT="${SCRAPER_LIMIT:-${DEFAULT_LIMIT:-}}"
           MONITOR_DAYS="${SCRAPER_MONITOR_DAYS:-${DEFAULT_MONITOR_DAYS:-30}}"
           BASELINE_WINDOW_DAYS="${SCRAPER_BASELINE_WINDOW_DAYS:-${DEFAULT_BASELINE_WINDOW_DAYS:-30}}"
-          FEATURE_WORKERS="${SCRAPER_FEATURE_WORKERS:-${DEFAULT_FEATURE_WORKERS:-8}}"
+          FEATURE_WORKERS="${SCRAPER_FEATURE_WORKERS:-${DEFAULT_FEATURE_WORKERS:-2}}"
           LOG_LEVEL="${SCRAPER_LOG_LEVEL:-INFO}"
 
           CMD=(python -m yt_insights --output latest_run.json --monitor-days "$MONITOR_DAYS" --baseline-window-days "$BASELINE_WINDOW_DAYS" --feature-workers "$FEATURE_WORKERS" --log-level "$LOG_LEVEL")

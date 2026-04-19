@@ -3,7 +3,14 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from yt_insights.transcript_cli import TranscriptResult, TranscriptSegment, fetch_transcript, get_video_id, save_to_json
+from yt_insights.transcript_cli import (
+    TranscriptResult,
+    TranscriptSegment,
+    VideoUnplayableError,
+    fetch_transcript,
+    get_video_id,
+    save_to_json,
+)
 
 
 class FakeFetchedTranscript:
@@ -105,6 +112,22 @@ def test_fetch_transcript_falls_back_to_any_available_language_when_english_is_m
 
     assert result.language_code == "fr"
     assert result.full_text == "Bonjour"
+
+
+def test_fetch_transcript_raises_video_unplayable_error_when_youtube_reports_unplayable_video() -> None:
+    class VideoUnplayable(Exception):
+        pass
+
+    class FakeApiWithUnplayable:
+        def list(self, video_id: str):
+            raise VideoUnplayable("live event has not started")
+
+    try:
+        fetch_transcript("abc123DEF45", api=FakeApiWithUnplayable())
+    except VideoUnplayableError:
+        pass
+    else:  # pragma: no cover - defensive guard
+        raise AssertionError("Expected VideoUnplayableError to be raised")
 
 
 def test_save_to_json_writes_expected_payload(tmp_path: Path) -> None:

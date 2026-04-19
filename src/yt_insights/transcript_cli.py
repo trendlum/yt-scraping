@@ -40,6 +40,10 @@ class VideoUnavailableError(TranscriptError):
     """Raised when YouTube reports that the video cannot be accessed."""
 
 
+class VideoUnplayableError(TranscriptError):
+    """Raised when YouTube reports that the video exists but is not playable yet."""
+
+
 class TranscriptNotAvailableError(TranscriptError):
     """Raised when no transcript exists for the requested video."""
 
@@ -106,6 +110,8 @@ def fetch_transcript(video_id: str, api: Any | None = None) -> TranscriptResult:
     except Exception as exc:  # pragma: no cover - library-specific failures
         if _is_youtube_transcript_exception(exc, "VideoUnavailable"):
             raise VideoUnavailableError(f"Video unavailable: {video_id}") from exc
+        if _is_youtube_transcript_exception(exc, "VideoUnplayable"):
+            raise VideoUnplayableError(f"Video unplayable: {video_id}") from exc
         if _is_youtube_transcript_exception(exc, "TranscriptsDisabled") or _is_youtube_transcript_exception(
             exc, "NoTranscriptFound"
         ):
@@ -180,6 +186,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     except TranscriptDependencyError as exc:
         raise SystemExit(str(exc)) from exc
     except VideoUnavailableError as exc:
+        raise SystemExit(str(exc)) from exc
+    except VideoUnplayableError as exc:
         raise SystemExit(str(exc)) from exc
     except TranscriptNotAvailableError as exc:
         raise SystemExit(str(exc)) from exc

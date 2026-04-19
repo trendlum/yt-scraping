@@ -40,6 +40,7 @@ _TRANSCRIPT_RETRYABLE_STATUSES = {
     "request_blocked",
     "ip_blocked",
     "dependency_missing",
+    "video_unplayable",
 }
 
 _THUMBNAIL_FIELDS = (
