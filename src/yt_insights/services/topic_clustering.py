@@ -173,7 +173,7 @@ def load_topic_cluster_prompt(prompt_path: Path | None = None) -> TopicClusterPr
         system_prompt = system_prompt + "\n\n--- EXAMPLES ---\n\n" + "\n\n".join(rendered_examples)
     return TopicClusterPrompt(
         description=str(prompt_payload.get("description", "topic clustering")).strip(),
-        model=str(prompt_payload.get("model", "deepseek-reasoner")).strip() or "deepseek-reasoner",
+        model=str(prompt_payload.get("model", "deepseek-chat")).strip() or "deepseek-chat",
         system_prompt=system_prompt,
         user_template=str(prompt_payload["user_message"]).strip(),
         prompt_fingerprint=sha1_text(raw_text),

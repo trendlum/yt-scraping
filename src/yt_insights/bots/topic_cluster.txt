@@ -1,6 +1,6 @@
 prompt:
   description: Extract topic clusters, format_type and promise_type from a YouTube video
-  model: deepseek
+  model: deepseek-chat
   input:
     - title
     - thumbnail_text

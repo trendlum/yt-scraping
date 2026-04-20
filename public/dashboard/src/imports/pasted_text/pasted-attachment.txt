@@ -1,0 +1,287 @@
+Design a high-end research lab dashboard for YouTube intelligence and opportunity scouting.
+
+The product must help users discover:
+- niches of interest
+- channels of interest
+- videos of interest
+- topic clusters worth replicating
+
+This dashboard is for analytical decision-making, not casual reporting.
+
+VISUAL DIRECTION
+- Hybrid style: premium dark base with subtle light surfaces inside cards
+- Looks like a research cockpit
+- Strong contrast and clear hierarchy
+- Neutral palette with one positive accent and one risk accent
+- Muted teal or green for positive signal
+- Amber for caution
+- Red only for critical warning
+- Avoid generic SaaS styling
+- Avoid purple-first branding
+- Dense, serious, deliberate
+
+PLACEHOLDER STYLE GUIDELINES
+- Use realistic placeholder data so the layout feels like a real product
+- Mix short labels with longer item names
+- Show numbers, deltas, and confidence badges in the placeholders
+- Include meaningful sample values, not lorem ipsum
+- Use placeholders that make ranking, filtering, and scanning easy to test
+
+PLACEHOLDER TOKEN MAP
+- {{analysis_date}}
+- {{window_days}}
+- {{niche_name}}
+- {{channel_handle}}
+- {{topic_cluster}}
+- {{video_title}}
+- {{status_chip}}
+- {{confidence_badge}}
+- {{score_value}}
+- {{delta_value}}
+- {{count_value}}
+- {{coverage_pct}}
+- {{sparkline}}
+
+PRIMARY UX GOAL
+Users should identify:
+- emerging niches
+- confirmed growing niches
+- improving channels
+- replicable topics
+- underpackaged videos
+- overpackaged videos
+
+SCREENS
+1. Overview
+2. Niches
+3. Channels
+4. Topics
+5. Videos
+
+GLOBAL FILTER BAR
+Sticky, persistent, compact:
+- analysis window: 30 / 60 / 90 days
+- analysis date
+- niche
+- channel handle
+- topic cluster
+- niche growth status
+- channel growth status
+- topic type
+- performance label
+- video type
+- sample confidence
+- minimum sample threshold
+
+OVERVIEW SCREEN
+Purpose: show where the strongest opportunities are.
+
+Sections:
+- KPI strip
+- signal quality summary
+- top niches to watch
+- top channels to watch
+- top topics to replicate
+- top video opportunities
+
+Niches panel should show:
+- niche
+- growth status
+- early signal score
+- confirmed growth score
+- sample confidence
+- distinct channels
+- total videos
+- quick trend sparkline
+
+Channels panel should show:
+- channel
+- niche
+- growth status
+- growth score
+- packaging improvement score
+- sustainability improvement score
+- algorithmic shift score
+- volatility score
+- delta overall score
+
+Topics panel should show:
+- topic cluster
+- topic type
+- replicability score
+- sustained traction score
+- fragility score
+- distinct channels
+- coverage percentage
+- concentration indicator
+
+Video opportunities should be split into:
+- underpackaged
+- overpackaged
+
+NICHE SCREEN
+- ranking table on the left
+- detail drawer on the right
+- comparison toggle: early vs confirmed
+- filters by confidence and status
+- show sample limitations clearly
+
+CHANNEL SCREEN
+- ranking table of channels
+- detail panel with recent vs previous window
+- highlight packaging improvement, sustainability improvement, algorithmic shift, volatility, and growth score
+
+TOPIC SCREEN
+- ranking table of topic clusters
+- detail panel emphasizing:
+- replicability
+- sustained traction
+- fragility
+- concentration
+- coverage
+- topic type
+
+VIDEO SCREEN
+Tabs:
+- underpackaged
+- overpackaged
+
+Each row should show:
+- title
+- channel
+- niche
+- age
+- packaging score
+- momentum score
+- ratio d1 / d3 / d7 / d15
+- performance label
+- opportunity type
+- confidence
+
+COMPONENTS TO DESIGN
+- sticky filter bar
+- KPI cards
+- status chips
+- confidence badges
+- ranked tables
+- sortable headers
+- score bars
+- delta pills
+- compact sparklines
+- tab switcher
+- detail drawer
+- loading skeletons
+- empty state
+- low confidence warning state
+- no data state
+
+PLACEHOLDER EXAMPLES
+Use these example values to guide the layout and spacing:
+
+Overview KPI placeholders:
+- Emerging niches: 12, delta +3
+- Confirmed growing niches: 7, delta +1
+- Improving channels: 18, delta +5
+- Replicable topics: 24, delta +4
+- Underpackaged videos: 31, delta +9
+- Overpackaged videos: 14, delta -2
+
+Niche row placeholders:
+- niche: "us iran geopolitics"
+- niche: "bitcoin etf flows"
+- niche: "spanish housing market"
+- status: "fast_emerging"
+- early score: 0.82
+- confirmed score: 0.74
+- confidence: "high"
+- video count: 48
+- distinct channels: 11
+
+Channel row placeholders:
+- channel: "@MeidasTouch"
+- channel: "@CoinBureauFinance"
+- channel: "@TheGeoNetwork"
+- niche: "politics"
+- growth status: "algorithmic_shift"
+- growth score: 0.79
+- delta overall score: +0.18
+- volatility: 0.22
+
+Topic row placeholders:
+- topic cluster: "trump foreign policy"
+- topic cluster: "middle east escalation"
+- topic cluster: "political news commentary"
+- topic type: "replicable"
+- replicability score: 0.86
+- sustained traction score: 0.78
+- fragility score: 0.19
+- coverage: 72%
+- distinct channels: 8
+
+Underpackaged video placeholders:
+- title: "Trump PANICS as Iran REJECTS ULTIMATUM"
+- title: "Why this market move is being ignored"
+- title: "The hidden risk behind this housing trend"
+- type: "clear_underpackaged"
+- score: 0.83
+- confidence: "high"
+- age: 3.4 days
+
+Overpackaged video placeholders:
+- title: "Breaking News: This changes everything"
+- title: "The shocking truth about this collapse"
+- title: "What happens next will surprise you"
+- type: "promise_weak"
+- score: 0.77
+- confidence: "medium"
+- age: 1.8 days
+
+Detail drawer placeholders:
+- performance label: "explosive"
+- ratio d1: 1.42
+- ratio d7: 1.88
+- ratio d15: 2.10
+- packaging score: 0.63
+- momentum score: 0.91
+- acceleration early: 0.27
+- consistency periods above baseline: 3
+
+DATA RULES
+- Use tables for ranked entities
+- Use compact sparklines for trends
+- Use score cards for normalized metrics
+- Use badges for categorical states
+- Always show confidence where sample size is weak
+- Do not overcomplicate charts
+
+INTERACTIONS
+- clicking a niche filters channels and topics
+- clicking a channel filters videos
+- clicking a topic filters videos
+- clicking a video opens detail drawer
+- filters persist across screens
+- sorting available on all ranking tables
+
+RESPONSIVE BEHAVIOR
+- desktop-first
+- tablet support
+- mobile filter drawer
+- ranking tables become cards
+- detail drawers become sheets
+
+CONSTRAINTS
+- do not create a generic admin dashboard
+- do not overuse decorative charts
+- do not bury confidence indicators
+- do not make raw counts the primary story
+- do not mix niches, channels, topics, and videos into one list
+
+INFORMATION PRIORITY
+1. replicability
+2. sustained traction
+3. growth direction
+4. confidence / sample quality
+5. opportunity type
+6. raw counts
+
+This should feel like a premium analytical workspace for scouting opportunity, with strong visual logic and clear decision support.

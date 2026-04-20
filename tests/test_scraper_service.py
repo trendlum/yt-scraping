@@ -159,7 +159,7 @@ def test_load_topic_cluster_prompt_uses_packaged_resource_when_repo_path_is_miss
     prompt = topic_clustering.load_topic_cluster_prompt()
 
     assert prompt.description == "Extract topic clusters, format_type and promise_type from a YouTube video"
-    assert prompt.model == "deepseek"
+    assert prompt.model == "deepseek-chat"
     assert "Return ONLY valid JSON" in prompt.system_prompt
     assert prompt.user_template == "Channel niche: {{channel_niche}}\nTitle: {{title}}\nThumbnail text: {{thumbnail_text}}"
 
