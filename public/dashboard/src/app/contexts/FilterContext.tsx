@@ -1,29 +1,15 @@
-import { createContext, useContext, useState, ReactNode } from 'react';
-
-interface Filters {
-  analysisWindow: string;
-  analysisDate: string;
-  niche: string;
-  channelHandle: string;
-  topicCluster: string;
-  nicheGrowthStatus: string;
-  channelGrowthStatus: string;
-  topicType: string;
-  performanceLabel: string;
-  videoType: string;
-  sampleConfidence: string;
-  minSampleThreshold: string;
-}
+import { createContext, useContext, useEffect, useState, ReactNode } from 'react';
+import type { DashboardFiltersState } from '../lib/dashboard';
 
 interface FilterContextType {
-  filters: Filters;
-  setFilters: (filters: Filters) => void;
+  filters: DashboardFiltersState;
+  setFilters: (filters: DashboardFiltersState) => void;
   resetFilters: () => void;
 }
 
-const defaultFilters: Filters = {
+const defaultFilters: DashboardFiltersState = {
   analysisWindow: '30',
-  analysisDate: '2026-04-20',
+  analysisDate: '',
   niche: '',
   channelHandle: '',
   topicCluster: '',
@@ -39,11 +25,39 @@ const defaultFilters: Filters = {
 const FilterContext = createContext<FilterContextType | undefined>(undefined);
 
 export function FilterProvider({ children }: { children: ReactNode }) {
-  const [filters, setFilters] = useState<Filters>(defaultFilters);
+  const [filters, setFilters] = useState<DashboardFiltersState>(defaultFilters);
 
   const resetFilters = () => {
     setFilters(defaultFilters);
   };
+
+  useEffect(() => {
+    if (filters.analysisDate) {
+      return;
+    }
+
+    const controller = new AbortController();
+
+    fetch('/api/dashboard/meta', { signal: controller.signal })
+      .then(async (response) => {
+        if (!response.ok) {
+          throw new Error('Failed to load dashboard metadata');
+        }
+        return response.json();
+      })
+      .then((payload) => {
+        if (!controller.signal.aborted && payload?.latest_analysis_date) {
+          setFilters((current) =>
+            current.analysisDate ? current : { ...current, analysisDate: payload.latest_analysis_date }
+          );
+        }
+      })
+      .catch(() => {
+        // Keep the UI usable if metadata cannot be resolved yet.
+      });
+
+    return () => controller.abort();
+  }, [filters.analysisDate]);
 
   return (
     <FilterContext.Provider value={{ filters, setFilters, resetFilters }}>

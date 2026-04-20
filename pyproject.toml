@@ -27,6 +27,8 @@ yt-insights = "yt_insights.cli:main"
 yt-thumbnail-debug = "yt_insights.tools.thumbnail_debug:main"
 yt-topic-cluster-debug = "yt_insights.tools.topic_cluster_debug:main"
 yt-topic-cluster-backfill = "yt_insights.tools.topic_cluster_backfill:main"
+yt-dashboard-api = "yt_insights.dashboard_api:main"
+yt-dashboard-dev = "yt_insights.dashboard_dev:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]

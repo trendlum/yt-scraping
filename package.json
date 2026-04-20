@@ -1,0 +1,9 @@
+{
+  "name": "yt-scraping",
+  "private": true,
+  "version": "0.1.0",
+  "scripts": {
+    "dashboard:dev": "python -m yt_insights.dashboard_dev",
+    "dashboard:build": "npm --prefix public/dashboard run build"
+  }
+}

@@ -1,453 +1,384 @@
-import { useState, useEffect, useMemo } from 'react';
-import { useLocation } from 'react-router';
-import { useFilters } from '../../contexts/FilterContext';
-import { StatusChip } from '../ui/StatusChip';
-import { ConfidenceBadge } from '../ui/ConfidenceBadge';
-import { ScoreBar } from '../ui/ScoreBar';
+import { useEffect, useMemo, useState } from "react";
+import { useLocation } from "react-router";
+import { useFilters } from "../../contexts/FilterContext";
+import {
+  buildDashboardQuery,
+  ConfidenceLevel,
+  formatAgeDays,
+  formatPercent,
+  formatScore,
+  titleCase,
+  VideoDetailResponse,
+  VideoRow,
+} from "../../lib/dashboard";
+import { useDashboardQuery } from "../../lib/useDashboardQuery";
+import { ConfidenceBadge } from "../ui/ConfidenceBadge";
+import { ScoreBar } from "../ui/ScoreBar";
+import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "../ui/sheet";
+import { StatusChip } from "../ui/StatusChip";
+import { Skeleton } from "../ui/skeleton";
+import { Tabs, TabsList, TabsTrigger } from "../ui/tabs";
 
-interface Video {
-  id: string;
-  title: string;
-  channel: string;
-  niche: string;
-  age: number;
-  packagingScore: number;
-  momentumScore: number;
-  ratioD1: number;
-  ratioD3: number;
-  ratioD7: number;
-  ratioD15: number;
-  performanceLabel: string;
-  opportunityType: string;
-  confidence: 'high' | 'medium' | 'low';
-  views: number;
-  accelerationEarly: number;
-  consistencyPeriods: number;
+type SortField = "primary_score" | "momentum_score" | "age_days" | "ratio_d7";
+
+function getPrimaryScore(row: VideoRow, tab: "underpackaged" | "overpackaged") {
+  return tab === "underpackaged" ? row.underpackaged_score ?? 0 : row.overpackaged_score ?? 0;
+}
+
+function getConfidence(row: VideoRow, tab: "underpackaged" | "overpackaged"): ConfidenceLevel {
+  const confidence = tab === "underpackaged" ? row.underpackaged_confidence : row.overpackaged_confidence;
+  return confidence ?? "medium";
+}
+
+function getType(row: VideoRow, tab: "underpackaged" | "overpackaged") {
+  return tab === "underpackaged" ? row.underpackaged_type || "unknown" : row.overpackaged_type || "unknown";
 }
 
 export function Videos() {
   const location = useLocation();
-  const { filters } = useFilters();
-  const [activeTab, setActiveTab] = useState<'underpackaged' | 'overpackaged'>('underpackaged');
-  const [selectedVideo, setSelectedVideo] = useState<Video | null>(null);
-  const [currentPage, setCurrentPage] = useState(1);
-  const itemsPerPage = 5;
+  const { filters, setFilters } = useFilters();
+  const [activeTab, setActiveTab] = useState<"underpackaged" | "overpackaged">(
+    (filters.videoType as "underpackaged" | "overpackaged") || "underpackaged",
+  );
+  const [selectedVideoId, setSelectedVideoId] = useState<string | null>(null);
+  const [sheetOpen, setSheetOpen] = useState(false);
+  const [sortField, setSortField] = useState<SortField>("primary_score");
+  const [sortDirection, setSortDirection] = useState<"asc" | "desc">("desc");
 
   useEffect(() => {
-    if (location.state?.tab) {
-      setActiveTab(location.state.tab as 'underpackaged' | 'overpackaged');
+    const initialTab = (location.state as { tab?: "underpackaged" | "overpackaged" } | null | undefined)?.tab;
+    if (initialTab) {
+      setActiveTab(initialTab);
+      return;
     }
-    if (location.state?.selectedId) {
-      const allVideos = [...underpackagedVideos, ...overpackagedVideos];
-      const video = allVideos.find(v => v.id === location.state.selectedId);
-      if (video) {
-        setSelectedVideo(video);
-      }
+    if (filters.videoType === "underpackaged" || filters.videoType === "overpackaged") {
+      setActiveTab(filters.videoType);
     }
-  }, [location.state]);
+  }, [filters.videoType, location.state]);
 
-  const underpackagedVideos: Video[] = [
-    {
-      id: '1',
-      title: 'Trump PANICS as Iran REJECTS ULTIMATUM',
-      channel: '@MeidasTouch',
-      niche: 'politics',
-      age: 3.4,
-      packagingScore: 0.63,
-      momentumScore: 0.91,
-      ratioD1: 1.42,
-      ratioD3: 1.68,
-      ratioD7: 1.88,
-      ratioD15: 2.10,
-      performanceLabel: 'explosive',
-      opportunityType: 'clear_underpackaged',
-      confidence: 'high',
-      views: 284000,
-      accelerationEarly: 0.27,
-      consistencyPeriods: 3,
-    },
-    {
-      id: '2',
-      title: 'Why this market move is being ignored',
-      channel: '@CoinBureauFinance',
-      niche: 'crypto',
-      age: 2.1,
-      packagingScore: 0.58,
-      momentumScore: 0.85,
-      ratioD1: 1.38,
-      ratioD3: 1.54,
-      ratioD7: 1.72,
-      ratioD15: 1.91,
-      performanceLabel: 'strong',
-      opportunityType: 'clear_underpackaged',
-      confidence: 'high',
-      views: 196000,
-      accelerationEarly: 0.31,
-      consistencyPeriods: 4,
-    },
-    {
-      id: '3',
-      title: 'The hidden risk behind this housing trend',
-      channel: '@EconomicsExplained',
-      niche: 'economics',
-      age: 4.7,
-      packagingScore: 0.61,
-      momentumScore: 0.78,
-      ratioD1: 1.28,
-      ratioD3: 1.45,
-      ratioD7: 1.61,
-      ratioD15: 1.79,
-      performanceLabel: 'solid',
-      opportunityType: 'clear_underpackaged',
-      confidence: 'medium',
-      views: 142000,
-      accelerationEarly: 0.22,
-      consistencyPeriods: 3,
-    },
-    {
-      id: '4',
-      title: 'What AI research just achieved is terrifying',
-      channel: '@TwoMinutePapers',
-      niche: 'ai research',
-      age: 1.8,
-      packagingScore: 0.55,
-      momentumScore: 0.94,
-      ratioD1: 1.52,
-      ratioD3: 1.84,
-      ratioD7: 2.12,
-      ratioD15: 2.38,
-      performanceLabel: 'explosive',
-      opportunityType: 'clear_underpackaged',
-      confidence: 'high',
-      views: 421000,
-      accelerationEarly: 0.35,
-      consistencyPeriods: 4,
-    },
-  ];
+  const listQuery = useMemo(() => buildDashboardQuery(filters, { limit: 250, video_type: activeTab }), [filters, activeTab]);
+  const { data, loading, error } = useDashboardQuery<{ items: VideoRow[] }>(
+    activeTab === "underpackaged"
+      ? "/api/dashboard/videos"
+      : "/api/dashboard/videos",
+    listQuery,
+  );
+  const items = data?.items ?? [];
 
-  const overpackagedVideos: Video[] = [
-    {
-      id: '5',
-      title: 'Breaking News: This changes everything',
-      channel: '@GenericNews',
-      niche: 'news',
-      age: 1.8,
-      packagingScore: 0.92,
-      momentumScore: 0.31,
-      ratioD1: 0.82,
-      ratioD3: 0.71,
-      ratioD7: 0.64,
-      ratioD15: 0.58,
-      performanceLabel: 'declining',
-      opportunityType: 'promise_weak',
-      confidence: 'medium',
-      views: 48000,
-      accelerationEarly: -0.18,
-      consistencyPeriods: 0,
-    },
-    {
-      id: '6',
-      title: 'The shocking truth about this collapse',
-      channel: '@ClickbaitChannel',
-      niche: 'finance',
-      age: 2.3,
-      packagingScore: 0.88,
-      momentumScore: 0.27,
-      ratioD1: 0.76,
-      ratioD3: 0.68,
-      ratioD7: 0.59,
-      ratioD15: 0.51,
-      performanceLabel: 'weak',
-      opportunityType: 'promise_weak',
-      confidence: 'high',
-      views: 32000,
-      accelerationEarly: -0.22,
-      consistencyPeriods: 0,
-    },
-    {
-      id: '7',
-      title: 'What happens next will surprise you',
-      channel: '@VagueContent',
-      niche: 'general',
-      age: 3.1,
-      packagingScore: 0.85,
-      momentumScore: 0.34,
-      ratioD1: 0.88,
-      ratioD3: 0.79,
-      ratioD7: 0.71,
-      ratioD15: 0.64,
-      performanceLabel: 'underperforming',
-      opportunityType: 'promise_weak',
-      confidence: 'medium',
-      views: 51000,
-      accelerationEarly: -0.15,
-      consistencyPeriods: 0,
-    },
-  ];
-
-  const filteredUnderpackaged = useMemo(() => {
-    return underpackagedVideos.filter(video => {
-      if (filters.channelHandle && !video.channel.toLowerCase().includes(filters.channelHandle.toLowerCase())) {
-        return false;
-      }
-      if (filters.niche && !video.niche.toLowerCase().includes(filters.niche.toLowerCase())) {
-        return false;
-      }
-      if (filters.performanceLabel && video.performanceLabel !== filters.performanceLabel) {
-        return false;
-      }
-      if (filters.sampleConfidence && video.confidence !== filters.sampleConfidence) {
-        return false;
-      }
-      return true;
-    });
-  }, [underpackagedVideos, filters]);
-
-  const filteredOverpackaged = useMemo(() => {
-    return overpackagedVideos.filter(video => {
-      if (filters.channelHandle && !video.channel.toLowerCase().includes(filters.channelHandle.toLowerCase())) {
-        return false;
-      }
-      if (filters.niche && !video.niche.toLowerCase().includes(filters.niche.toLowerCase())) {
-        return false;
-      }
-      if (filters.performanceLabel && video.performanceLabel !== filters.performanceLabel) {
-        return false;
-      }
-      if (filters.sampleConfidence && video.confidence !== filters.sampleConfidence) {
-        return false;
-      }
-      return true;
-    });
-  }, [overpackagedVideos, filters]);
-
-  const currentVideos = activeTab === 'underpackaged' ? filteredUnderpackaged : filteredOverpackaged;
-  const totalPages = Math.ceil(currentVideos.length / itemsPerPage);
-  const paginatedVideos = currentVideos.slice(
-    (currentPage - 1) * itemsPerPage,
-    currentPage * itemsPerPage
+  const selectedRow = useMemo(
+    () => items.find((row) => row.video_id === selectedVideoId) ?? null,
+    [items, selectedVideoId],
   );
 
+  const detailQuery = useMemo(
+    () => buildDashboardQuery(filters, { video_id: selectedVideoId ?? "" }),
+    [filters, selectedVideoId],
+  );
+  const { data: detailData, loading: detailLoading } = useDashboardQuery<VideoDetailResponse>(
+    selectedVideoId ? "/api/dashboard/video-detail" : "/api/dashboard/video-detail",
+    detailQuery,
+  );
+
+  useEffect(() => {
+    if (selectedVideoId && !items.some((row) => row.video_id === selectedVideoId)) {
+      setSelectedVideoId(items[0]?.video_id ?? null);
+    }
+  }, [items, selectedVideoId]);
+
+  const sortedItems = useMemo(() => {
+    return [...items].sort((left, right) => {
+      const leftValue =
+        sortField === "primary_score"
+          ? getPrimaryScore(left, activeTab)
+          : sortField === "momentum_score"
+            ? left.momentum_score ?? 0
+            : sortField === "age_days"
+              ? left.age_days ?? 0
+              : left.ratio_d7 ?? 0;
+      const rightValue =
+        sortField === "primary_score"
+          ? getPrimaryScore(right, activeTab)
+          : sortField === "momentum_score"
+            ? right.momentum_score ?? 0
+            : sortField === "age_days"
+              ? right.age_days ?? 0
+              : right.ratio_d7 ?? 0;
+      return sortDirection === "desc" ? rightValue - leftValue : leftValue - rightValue;
+    });
+  }, [activeTab, items, sortDirection, sortField]);
+
+  const onSort = (field: SortField) => {
+    if (field === sortField) {
+      setSortDirection((current) => (current === "desc" ? "asc" : "desc"));
+      return;
+    }
+    setSortField(field);
+    setSortDirection("desc");
+  };
+
+  const handleSelect = (row: VideoRow) => {
+    setSelectedVideoId(row.video_id);
+    setSheetOpen(true);
+    setFilters({
+      ...filters,
+      channelHandle: row.channel_handle,
+      niche: row.channel_niche || filters.niche,
+      videoType: activeTab,
+    });
+  };
+
+  const openTab = (tab: "underpackaged" | "overpackaged") => {
+    setActiveTab(tab);
+    setSortField("primary_score");
+    setSortDirection("desc");
+    setFilters({ ...filters, videoType: tab });
+  };
+
   return (
-    <div className="h-[calc(100vh-180px)] overflow-auto px-4 pt-4 pb-0">
-      <div className={selectedVideo ? '' : 'pb-4'}>
-        <div className="mb-3 flex items-center justify-between">
-          <div className="flex items-center gap-4">
-            <div className="flex items-center gap-2">
-              <button
-                onClick={() => {
-                  setActiveTab('underpackaged');
-                  setCurrentPage(1);
-                }}
-                className={`px-3 py-1.5 rounded text-xs transition ${
-                  activeTab === 'underpackaged'
-                    ? 'bg-primary/10 text-primary'
-                    : 'text-muted-foreground hover:text-primary hover:bg-muted'
-                }`}
-              >
-                Underpackaged
-              </button>
-              <button
-                onClick={() => {
-                  setActiveTab('overpackaged');
-                  setCurrentPage(1);
-                }}
-                className={`px-3 py-1.5 rounded text-xs transition ${
-                  activeTab === 'overpackaged'
-                    ? 'bg-primary/10 text-primary'
-                    : 'text-muted-foreground hover:text-primary hover:bg-muted'
-                }`}
-              >
-                Overpackaged
-              </button>
-            </div>
-            <div className="flex items-center gap-2 text-xs">
-              <button
-                onClick={() => setCurrentPage(Math.max(1, currentPage - 1))}
-                disabled={currentPage === 1}
-                className="px-2 py-1 text-muted-foreground hover:text-primary disabled:opacity-30 disabled:cursor-not-allowed"
-              >
-                ←
-              </button>
-              <span className="text-muted-foreground">
-                {currentPage} / {totalPages}
-              </span>
-              <button
-                onClick={() => setCurrentPage(Math.min(totalPages, currentPage + 1))}
-                disabled={currentPage === totalPages}
-                className="px-2 py-1 text-muted-foreground hover:text-primary disabled:opacity-30 disabled:cursor-not-allowed"
-              >
-                →
-              </button>
-            </div>
+    <div className="h-[calc(100vh-180px)] overflow-auto px-4 pt-4 pb-6">
+      <div className="space-y-4">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <Tabs value={activeTab} onValueChange={(value) => openTab(value as "underpackaged" | "overpackaged")}>
+            <TabsList>
+              <TabsTrigger value="underpackaged">Underpackaged</TabsTrigger>
+              <TabsTrigger value="overpackaged">Overpackaged</TabsTrigger>
+            </TabsList>
+          </Tabs>
+
+          <div className="flex items-center gap-2 text-xs">
+            <button
+              type="button"
+              onClick={() => onSort("primary_score")}
+              className={sortField === "primary_score" ? "text-primary" : "text-muted-foreground"}
+            >
+              Primary
+            </button>
+            <button
+              type="button"
+              onClick={() => onSort("momentum_score")}
+              className={sortField === "momentum_score" ? "text-primary" : "text-muted-foreground"}
+            >
+              Momentum
+            </button>
+            <button
+              type="button"
+              onClick={() => onSort("age_days")}
+              className={sortField === "age_days" ? "text-primary" : "text-muted-foreground"}
+            >
+              Age
+            </button>
           </div>
         </div>
 
-        <div className="bg-card border border-border rounded-lg overflow-hidden">
-          <table className="w-full">
-            <thead className="bg-muted border-b border-border">
-              <tr className="text-[10px] text-muted-foreground uppercase tracking-wide">
-                <th className="text-left px-3 py-2">Title</th>
-                <th className="text-left px-3 py-2">Channel</th>
-                <th className="text-left px-3 py-2">Niche</th>
-                <th className="text-left px-3 py-2">Age</th>
-                <th className="text-left px-3 py-2">Packaging</th>
-                <th className="text-left px-3 py-2">Momentum</th>
-                <th className="text-left px-3 py-2">Performance</th>
-                <th className="text-left px-3 py-2">Confidence</th>
-              </tr>
-            </thead>
-            <tbody>
-              {paginatedVideos.map((video) => (
-                <tr
-                  key={video.id}
-                  className={`border-b border-border hover:bg-muted/50 cursor-pointer transition ${selectedVideo?.id === video.id ? 'bg-primary/5' : ''}`}
-                  onClick={() => setSelectedVideo(video)}
-                >
-                  <td className="px-3 py-2.5 max-w-md">
-                    <div className="truncate text-sm text-foreground">{video.title}</div>
-                  </td>
-                  <td className="px-3 py-2.5 text-xs text-muted-foreground">{video.channel}</td>
-                  <td className="px-3 py-2.5 text-xs text-muted-foreground">{video.niche}</td>
-                  <td className="px-3 py-2.5 text-xs text-muted-foreground">{video.age.toFixed(1)}d</td>
-                  <td className="px-3 py-2.5">
-                    <div className="w-16">
-                      <ScoreBar score={video.packagingScore} variant={activeTab === 'underpackaged' ? 'caution' : 'positive'} />
-                    </div>
-                  </td>
-                  <td className="px-3 py-2.5">
-                    <div className="w-16">
-                      <ScoreBar score={video.momentumScore} variant={activeTab === 'underpackaged' ? 'positive' : 'critical'} />
-                    </div>
-                  </td>
-                  <td className="px-3 py-2.5">
-                    <StatusChip status={video.performanceLabel} variant={activeTab === 'underpackaged' ? 'positive' : 'caution'} />
-                  </td>
-                  <td className="px-3 py-2.5">
-                    <ConfidenceBadge confidence={video.confidence} />
-                  </td>
-                </tr>
+        <section className="rounded-xl border border-border bg-card">
+          <div className="flex items-center justify-between border-b border-border px-4 py-3">
+            <div>
+              <h2 className="text-sm text-foreground">
+                {activeTab === "underpackaged" ? "Underpackaged opportunities" : "Overpackaged videos"}
+              </h2>
+              <p className="text-xs text-muted-foreground">
+                Rows are sorted by opportunity score and filtered by the global dashboard state.
+              </p>
+            </div>
+          </div>
+
+          {loading ? (
+            <div className="space-y-3 p-4">
+              {Array.from({ length: 5 }).map((_, index) => (
+                <Skeleton key={index} className="h-16 w-full" />
               ))}
-            </tbody>
-          </table>
-        </div>
-
-        {selectedVideo && (
-          <div className="mt-4 bg-card border border-border rounded-lg p-4">
-            <div className="flex items-start justify-between mb-4">
-              <h3 className="text-sm text-foreground">Video Details</h3>
-              <button
-                onClick={() => setSelectedVideo(null)}
-                className="text-muted-foreground hover:text-primary text-sm"
-              >
-                ✕
-              </button>
             </div>
-
-            <div className="mb-4">
-              <h3 className="mb-2 text-sm text-foreground">{selectedVideo.title}</h3>
-              <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                <span>{selectedVideo.channel}</span>
-                <span>·</span>
-                <span>{selectedVideo.niche}</span>
-              </div>
+          ) : error ? (
+            <div className="p-4 text-sm text-critical">{error}</div>
+          ) : sortedItems.length === 0 ? (
+            <div className="p-4 text-sm text-muted-foreground">No videos match the current filters.</div>
+          ) : (
+            <div className="overflow-hidden">
+              <table className="w-full">
+                <thead className="border-b border-border bg-muted/40 text-[10px] uppercase tracking-wide text-muted-foreground">
+                  <tr>
+                    <th className="px-4 py-2 text-left">Title</th>
+                    <th className="px-4 py-2 text-left">Channel</th>
+                    <th className="px-4 py-2 text-left">Niche</th>
+                    <th className="px-4 py-2 text-left">Age</th>
+                    <th className="px-4 py-2 text-left">Packaging</th>
+                    <th className="px-4 py-2 text-left">Momentum</th>
+                    <th className="px-4 py-2 text-left">D1 / D3 / D7 / D15</th>
+                    <th className="px-4 py-2 text-left">Opportunity</th>
+                    <th className="px-4 py-2 text-left">Confidence</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {sortedItems.map((row) => (
+                    <tr
+                      key={row.video_id}
+                      onClick={() => handleSelect(row)}
+                      className="cursor-pointer border-b border-border transition hover:bg-muted/30"
+                    >
+                      <td className="px-4 py-3">
+                        <div className="max-w-[320px] truncate text-sm text-foreground">{row.title}</div>
+                        <div className="mt-1 text-[10px] uppercase tracking-wide text-muted-foreground">
+                          {titleCase(filters.analysisWindow ? `${filters.analysisWindow} day window` : "Latest")}
+                        </div>
+                      </td>
+                      <td className="px-4 py-3 text-sm text-muted-foreground">{row.channel_handle}</td>
+                      <td className="px-4 py-3 text-sm text-muted-foreground">{row.channel_niche || "Uncategorized"}</td>
+                      <td className="px-4 py-3 text-sm text-muted-foreground">{formatAgeDays(row.age_days)}</td>
+                      <td className="px-4 py-3">
+                        <div className="w-24">
+                          <ScoreBar score={row.packaging_score ?? 0} variant={activeTab === "underpackaged" ? "caution" : "positive"} />
+                        </div>
+                      </td>
+                      <td className="px-4 py-3">
+                        <div className="w-24">
+                          <ScoreBar score={row.momentum_score ?? 0} variant={activeTab === "underpackaged" ? "positive" : "critical"} />
+                        </div>
+                      </td>
+                      <td className="px-4 py-3 text-[11px] text-muted-foreground">
+                        {formatScore(row.ratio_d1)} / {formatScore(row.ratio_d3)} / {formatScore(row.ratio_d7)} / {formatScore(row.ratio_d15)}
+                      </td>
+                      <td className="px-4 py-3">
+                        <StatusChip status={getType(row, activeTab)} variant={activeTab === "underpackaged" ? "positive" : "caution"} />
+                      </td>
+                      <td className="px-4 py-3">
+                        <ConfidenceBadge confidence={getConfidence(row, activeTab)} />
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
             </div>
+          )}
+        </section>
+      </div>
 
-            <div className="grid grid-cols-4 gap-6">
+      <Sheet open={sheetOpen} onOpenChange={setSheetOpen}>
+        <SheetContent side="right" className="w-full overflow-y-auto border-border bg-card sm:max-w-xl">
+          <SheetHeader>
+            <SheetTitle>Video detail</SheetTitle>
+            <SheetDescription>Packaging, momentum, ratios, and the latest performance snapshot.</SheetDescription>
+          </SheetHeader>
 
-              <div>
-                <h4 className="text-xs text-muted-foreground mb-2 uppercase tracking-wide">Opportunity Classification</h4>
-                <div className="space-y-2">
-                  <div className="flex items-center justify-between text-sm">
-                    <span className="text-muted-foreground">Type</span>
-                    <StatusChip status={selectedVideo.opportunityType} variant={activeTab === 'underpackaged' ? 'positive' : 'caution'} />
+          {!selectedRow ? (
+            <div className="px-4 pb-4 text-sm text-muted-foreground">Select a video to inspect its full detail panel.</div>
+          ) : detailLoading ? (
+            <div className="space-y-3 px-4 pb-4">
+              <Skeleton className="h-24 w-full" />
+              <Skeleton className="h-24 w-full" />
+              <Skeleton className="h-24 w-full" />
+            </div>
+          ) : (
+            <div className="space-y-4 px-4 pb-6">
+              <div className="rounded-lg border border-border bg-background/40 p-3">
+                <div className="text-base text-foreground">{selectedRow.title}</div>
+                <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                  <span>{selectedRow.channel_handle}</span>
+                  <span>{selectedRow.channel_niche || "Uncategorized"}</span>
+                  <span>{formatAgeDays(selectedRow.age_days)}</span>
+                </div>
+                <div className="mt-3 flex flex-wrap gap-2">
+                  <StatusChip status={getType(selectedRow, activeTab)} variant={activeTab === "underpackaged" ? "positive" : "caution"} />
+                  <StatusChip status={selectedRow.performance_label || "unclassified"} variant={activeTab === "underpackaged" ? "positive" : "caution"} />
+                  <ConfidenceBadge confidence={getConfidence(selectedRow, activeTab)} />
+                </div>
+              </div>
+
+              <div className="grid gap-3 sm:grid-cols-2">
+                <div className="rounded-lg border border-border bg-background/40 p-3">
+                  <div className="text-[10px] uppercase tracking-wide text-muted-foreground">Packaging score</div>
+                  <div className="mt-1 text-lg text-foreground">{formatScore(selectedRow.packaging_score)}</div>
+                  <ScoreBar score={selectedRow.packaging_score ?? 0} variant={activeTab === "underpackaged" ? "caution" : "positive"} />
+                </div>
+                <div className="rounded-lg border border-border bg-background/40 p-3">
+                  <div className="text-[10px] uppercase tracking-wide text-muted-foreground">Momentum score</div>
+                  <div className="mt-1 text-lg text-foreground">{formatScore(selectedRow.momentum_score)}</div>
+                  <ScoreBar score={selectedRow.momentum_score ?? 0} variant={activeTab === "underpackaged" ? "positive" : "critical"} />
+                </div>
+              </div>
+
+              <div className="rounded-lg border border-border bg-background/40 p-3">
+                <div className="mb-2 text-xs uppercase tracking-wide text-muted-foreground">Ratios</div>
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <div>
+                    <div className="text-xs text-muted-foreground">D1</div>
+                    <div className="text-sm text-foreground">{formatScore(selectedRow.ratio_d1)}</div>
                   </div>
-                  <div className="flex items-center justify-between text-sm">
-                    <span className="text-muted-foreground">Performance</span>
-                    <StatusChip status={selectedVideo.performanceLabel} variant={activeTab === 'underpackaged' ? 'positive' : 'caution'} />
+                  <div>
+                    <div className="text-xs text-muted-foreground">D3</div>
+                    <div className="text-sm text-foreground">{formatScore(selectedRow.ratio_d3)}</div>
                   </div>
-                  <div className="flex items-center justify-between text-sm">
-                    <span className="text-muted-foreground">Confidence</span>
-                    <ConfidenceBadge confidence={selectedVideo.confidence} />
+                  <div>
+                    <div className="text-xs text-muted-foreground">D7</div>
+                    <div className="text-sm text-foreground">{formatScore(selectedRow.ratio_d7)}</div>
+                  </div>
+                  <div>
+                    <div className="text-xs text-muted-foreground">D15</div>
+                    <div className="text-sm text-foreground">{formatScore(selectedRow.ratio_d15)}</div>
                   </div>
                 </div>
               </div>
 
-              <div>
-                <h4 className="text-xs text-muted-foreground mb-2 uppercase tracking-wide">Core Metrics</h4>
-                <div className="space-y-3">
-                  <div>
-                    <div className="text-xs text-muted-foreground mb-1">Packaging score</div>
-                    <ScoreBar score={selectedVideo.packagingScore} variant={activeTab === 'underpackaged' ? 'caution' : 'positive'} />
-                  </div>
-                  <div>
-                    <div className="text-xs text-muted-foreground mb-1">Momentum score</div>
-                    <ScoreBar score={selectedVideo.momentumScore} variant={activeTab === 'underpackaged' ? 'positive' : 'critical'} />
-                  </div>
-                </div>
-              </div>
-
-              <div>
-                <h4 className="text-xs text-muted-foreground mb-2 uppercase tracking-wide">Performance Ratios</h4>
-                <div className="grid grid-cols-2 gap-3 text-sm">
-                  <div>
-                    <div className="text-muted-foreground mb-1">Day 1 ratio</div>
-                    <div className={selectedVideo.ratioD1 > 1 ? 'text-positive' : 'text-critical'}>{selectedVideo.ratioD1.toFixed(2)}</div>
-                  </div>
-                  <div>
-                    <div className="text-muted-foreground mb-1">Day 3 ratio</div>
-                    <div className={selectedVideo.ratioD3 > 1 ? 'text-positive' : 'text-critical'}>{selectedVideo.ratioD3.toFixed(2)}</div>
-                  </div>
-                  <div>
-                    <div className="text-muted-foreground mb-1">Day 7 ratio</div>
-                    <div className={selectedVideo.ratioD7 > 1 ? 'text-positive' : 'text-critical'}>{selectedVideo.ratioD7.toFixed(2)}</div>
-                  </div>
-                  <div>
-                    <div className="text-muted-foreground mb-1">Day 15 ratio</div>
-                    <div className={selectedVideo.ratioD15 > 1 ? 'text-positive' : 'text-critical'}>{selectedVideo.ratioD15.toFixed(2)}</div>
-                  </div>
-                </div>
-              </div>
-
-              <div>
-                <h4 className="text-xs text-muted-foreground mb-2 uppercase tracking-wide">Additional Details</h4>
+              <div className="rounded-lg border border-border bg-background/40 p-3">
+                <div className="mb-2 text-xs uppercase tracking-wide text-muted-foreground">Performance snapshot</div>
                 <div className="space-y-2 text-sm">
                   <div className="flex items-center justify-between">
-                    <span className="text-muted-foreground">Total views</span>
-                    <span>{selectedVideo.views.toLocaleString()}</span>
+                    <span className="text-muted-foreground">Performance label</span>
+                    <span className="text-foreground">{selectedRow.performance_label || "unclassified"}</span>
                   </div>
                   <div className="flex items-center justify-between">
-                    <span className="text-muted-foreground">Video age</span>
-                    <span>{selectedVideo.age.toFixed(1)} days</span>
+                    <span className="text-muted-foreground">Current published date</span>
+                    <span className="text-foreground">{selectedRow.published_at ? selectedRow.published_at.slice(0, 10) : "—"}</span>
                   </div>
                   <div className="flex items-center justify-between">
-                    <span className="text-muted-foreground">Early acceleration</span>
-                    <span className={selectedVideo.accelerationEarly > 0 ? 'text-positive' : 'text-critical'}>
-                      {selectedVideo.accelerationEarly > 0 ? '+' : ''}{selectedVideo.accelerationEarly.toFixed(2)}
-                    </span>
-                  </div>
-                  <div className="flex items-center justify-between">
-                    <span className="text-muted-foreground">Consistency periods</span>
-                    <span>{selectedVideo.consistencyPeriods}</span>
+                    <span className="text-muted-foreground">Title clusters</span>
+                    <span className="text-foreground">{detailData?.row?.topic_clusters?.length ?? 0}</span>
                   </div>
                 </div>
               </div>
+
+              {activeTab === "underpackaged" && (selectedRow.momentum_score ?? 0) > 0.85 ? (
+                <div className="rounded-lg border border-positive/30 bg-positive/10 p-3 text-xs text-positive-foreground">
+                  Strong underpackaging signal. High momentum with weak packaging suggests a clean replication target.
+                </div>
+              ) : null}
+
+              {activeTab === "overpackaged" && (selectedRow.packaging_score ?? 0) > 0.85 && (selectedRow.momentum_score ?? 0) < 0.35 ? (
+                <div className="rounded-lg border border-caution/30 bg-caution/10 p-3 text-xs text-caution-foreground">
+                  Promise-delivery mismatch. High packaging with weak momentum suggests the content did not deliver.
+                </div>
+              ) : null}
+
+              <div className="rounded-lg border border-border bg-background/40 p-3">
+                <div className="mb-2 text-xs uppercase tracking-wide text-muted-foreground">Supporting data</div>
+                <div className="space-y-2">
+                  {detailData?.row ? (
+                    <div className="text-sm text-muted-foreground">
+                      {detailData.row.view_count ? `${detailData.row.view_count.toLocaleString()} views` : "No view count available"} ·{" "}
+                      {detailData.row.like_count ? `${detailData.row.like_count.toLocaleString()} likes` : "No likes data"} ·{" "}
+                      {detailData.row.comment_count ? `${detailData.row.comment_count.toLocaleString()} comments` : "No comments data"}
+                    </div>
+                  ) : (
+                    <div className="text-sm text-muted-foreground">No detail payload returned yet.</div>
+                  )}
+                </div>
+              </div>
+
+              <div className="rounded-lg border border-border bg-background/40 p-3">
+                <div className="mb-2 text-xs uppercase tracking-wide text-muted-foreground">Topic clusters</div>
+                <div className="flex flex-wrap gap-2">
+                  {(detailData?.row?.topic_clusters ?? []).length === 0 ? (
+                    <div className="text-sm text-muted-foreground">No topics were attached to this video.</div>
+                  ) : (
+                    (detailData?.row?.topic_clusters ?? []).map((topic) => (
+                      <StatusChip key={topic} status={topic} variant="neutral" />
+                    ))
+                  )}
+                </div>
+              </div>
             </div>
-
-            {activeTab === 'underpackaged' && selectedVideo.momentumScore > 0.85 && (
-              <div className="mt-4 p-3 bg-positive/10 border border-positive/30 rounded text-xs text-positive-foreground">
-                ✓ Strong underpackaging signal. High momentum with weak packaging suggests significant opportunity for replication with better presentation.
-              </div>
-            )}
-
-            {activeTab === 'overpackaged' && selectedVideo.packagingScore > 0.85 && selectedVideo.momentumScore < 0.35 && (
-              <div className="mt-4 p-3 bg-caution/10 border border-caution/30 rounded text-xs text-caution-foreground">
-                ⚠️ Promise-delivery mismatch. High packaging score but weak momentum suggests the content didn't deliver on the packaging promise.
-              </div>
-            )}
-          </div>
-        )}
-      </div>
+          )}
+        </SheetContent>
+      </Sheet>
     </div>
   );
 }

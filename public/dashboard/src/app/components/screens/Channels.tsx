@@ -1,389 +1,334 @@
-import { useState, useEffect, useMemo } from 'react';
-import { useLocation } from 'react-router';
-import { useFilters } from '../../contexts/FilterContext';
-import { StatusChip } from '../ui/StatusChip';
-import { ScoreBar } from '../ui/ScoreBar';
-import { DeltaPill } from '../ui/DeltaPill';
+import { useEffect, useMemo, useState } from "react";
+import { useLocation } from "react-router";
+import { useFilters } from "../../contexts/FilterContext";
+import {
+  buildDashboardQuery,
+  ChannelDetailResponse,
+  ChannelRow,
+  formatScore,
+  titleCase,
+} from "../../lib/dashboard";
+import { useDashboardQuery } from "../../lib/useDashboardQuery";
+import { ConfidenceBadge } from "../ui/ConfidenceBadge";
+import { DeltaPill } from "../ui/DeltaPill";
+import { ScoreBar } from "../ui/ScoreBar";
+import { Sparkline } from "../ui/Sparkline";
+import { StatusChip } from "../ui/StatusChip";
+import { Skeleton } from "../ui/skeleton";
 
-interface Channel {
-  id: string;
-  channel: string;
-  niche: string;
-  growthStatus: string;
-  growthScore: number;
-  packagingScore: number;
-  sustainabilityScore: number;
-  algorithmicShiftScore: number;
-  volatilityScore: number;
-  deltaOverall: number;
-  recentPeriod: {
-    avgViews: number;
-    avgEngagement: number;
-    videoCount: number;
-  };
-  previousPeriod: {
-    avgViews: number;
-    avgEngagement: number;
-    videoCount: number;
-  };
+type SortField =
+  | "channel_growth_score"
+  | "channel_packaging_improvement_score"
+  | "channel_sustainability_improvement_score"
+  | "channel_volatility_score"
+  | "delta_overall_score";
+
+function scoreValue(value: number | null | undefined) {
+  return value ?? 0;
+}
+
+function scoreVariant(value: number | null | undefined): "positive" | "caution" | "critical" {
+  if (value === null || value === undefined) {
+    return "critical";
+  }
+  if (value >= 0.8) {
+    return "positive";
+  }
+  if (value >= 0.6) {
+    return "caution";
+  }
+  return "critical";
 }
 
 export function Channels() {
   const location = useLocation();
-  const { filters } = useFilters();
-  const [selectedChannel, setSelectedChannel] = useState<Channel | null>(null);
-  const [sortField, setSortField] = useState<keyof Channel>('growthScore');
-  const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('desc');
-  const [currentPage, setCurrentPage] = useState(1);
-  const itemsPerPage = 5;
+  const { filters, setFilters } = useFilters();
+  const [selectedChannel, setSelectedChannel] = useState<string | null>(null);
+  const [sortField, setSortField] = useState<SortField>("channel_growth_score");
+  const [sortDirection, setSortDirection] = useState<"asc" | "desc">("desc");
 
-  const channels: Channel[] = [
-    {
-      id: '1',
-      channel: '@MeidasTouch',
-      niche: 'politics',
-      growthStatus: 'algorithmic_shift',
-      growthScore: 0.79,
-      packagingScore: 0.72,
-      sustainabilityScore: 0.68,
-      algorithmicShiftScore: 0.85,
-      volatilityScore: 0.22,
-      deltaOverall: 0.18,
-      recentPeriod: {
-        avgViews: 245000,
-        avgEngagement: 0.068,
-        videoCount: 28,
-      },
-      previousPeriod: {
-        avgViews: 187000,
-        avgEngagement: 0.055,
-        videoCount: 24,
-      },
-    },
-    {
-      id: '2',
-      channel: '@CoinBureauFinance',
-      niche: 'crypto analysis',
-      growthStatus: 'improving',
-      growthScore: 0.74,
-      packagingScore: 0.81,
-      sustainabilityScore: 0.76,
-      algorithmicShiftScore: 0.45,
-      volatilityScore: 0.31,
-      deltaOverall: 0.12,
-      recentPeriod: {
-        avgViews: 312000,
-        avgEngagement: 0.074,
-        videoCount: 18,
-      },
-      previousPeriod: {
-        avgViews: 289000,
-        avgEngagement: 0.069,
-        videoCount: 16,
-      },
-    },
-    {
-      id: '3',
-      channel: '@TheGeoNetwork',
-      niche: 'geopolitics',
-      growthStatus: 'improving',
-      growthScore: 0.68,
-      packagingScore: 0.65,
-      sustainabilityScore: 0.72,
-      algorithmicShiftScore: 0.38,
-      volatilityScore: 0.19,
-      deltaOverall: 0.09,
-      recentPeriod: {
-        avgViews: 158000,
-        avgEngagement: 0.061,
-        videoCount: 22,
-      },
-      previousPeriod: {
-        avgViews: 142000,
-        avgEngagement: 0.058,
-        videoCount: 20,
-      },
-    },
-    {
-      id: '4',
-      channel: '@TwoMinutePapers',
-      niche: 'ai research',
-      growthStatus: 'improving',
-      growthScore: 0.82,
-      packagingScore: 0.88,
-      sustainabilityScore: 0.91,
-      algorithmicShiftScore: 0.52,
-      volatilityScore: 0.12,
-      deltaOverall: 0.15,
-      recentPeriod: {
-        avgViews: 428000,
-        avgEngagement: 0.082,
-        videoCount: 15,
-      },
-      previousPeriod: {
-        avgViews: 376000,
-        avgEngagement: 0.078,
-        videoCount: 14,
-      },
-    },
-  ];
-
-  const filteredChannels = useMemo(() => {
-    return channels.filter(channel => {
-      if (filters.channelHandle && !channel.channel.toLowerCase().includes(filters.channelHandle.toLowerCase())) {
-        return false;
-      }
-      if (filters.niche && !channel.niche.toLowerCase().includes(filters.niche.toLowerCase())) {
-        return false;
-      }
-      if (filters.channelGrowthStatus && channel.growthStatus !== filters.channelGrowthStatus) {
-        return false;
-      }
-      return true;
-    });
-  }, [channels, filters]);
-
-  const sortedChannels = [...filteredChannels].sort((a, b) => {
-    const aVal = a[sortField];
-    const bVal = b[sortField];
-    if (typeof aVal === 'number' && typeof bVal === 'number') {
-      return sortDirection === 'desc' ? bVal - aVal : aVal - bVal;
-    }
-    return 0;
-  });
-
-  const totalPages = Math.ceil(sortedChannels.length / itemsPerPage);
-  const paginatedChannels = sortedChannels.slice(
-    (currentPage - 1) * itemsPerPage,
-    currentPage * itemsPerPage
-  );
-
-  const handleSort = (field: keyof Channel) => {
-    if (sortField === field) {
-      setSortDirection(sortDirection === 'desc' ? 'asc' : 'desc');
-    } else {
-      setSortField(field);
-      setSortDirection('desc');
-    }
-  };
+  const query = useMemo(() => buildDashboardQuery(filters, { limit: 250 }), [filters]);
+  const { data, loading, error } = useDashboardQuery<{ items: ChannelRow[] }>("/api/dashboard/channels", query);
+  const items = data?.items ?? [];
 
   useEffect(() => {
-    if (location.state?.selectedId) {
-      const channel = channels.find(c => c.id === location.state.selectedId);
-      if (channel) {
-        setSelectedChannel(channel);
-      }
+    const initial = (location.state as { selectedId?: string } | null | undefined)?.selectedId;
+    if (initial && items.some((row) => row.channel_handle === initial)) {
+      setSelectedChannel(initial);
+      return;
     }
-  }, [location.state]);
+    if (!selectedChannel && items.length > 0) {
+      setSelectedChannel(items[0].channel_handle);
+    }
+  }, [items, location.state, selectedChannel]);
+
+  useEffect(() => {
+    if (selectedChannel && !items.some((row) => row.channel_handle === selectedChannel)) {
+      setSelectedChannel(items[0]?.channel_handle ?? null);
+    }
+  }, [items, selectedChannel]);
+
+  const selectedRow = useMemo(
+    () => items.find((row) => row.channel_handle === selectedChannel) ?? null,
+    [items, selectedChannel],
+  );
+
+  const detailQuery = useMemo(
+    () => buildDashboardQuery(filters, { channel_handle: selectedRow?.channel_handle ?? selectedChannel ?? "" }),
+    [filters, selectedRow?.channel_handle, selectedChannel],
+  );
+  const { data: detailData, loading: detailLoading } = useDashboardQuery<ChannelDetailResponse>(
+    "/api/dashboard/channel-detail",
+    detailQuery,
+  );
+
+  const sortedItems = useMemo(() => {
+    return [...items].sort((left, right) => {
+      const leftValue = scoreValue(left[sortField]);
+      const rightValue = scoreValue(right[sortField]);
+      return sortDirection === "desc" ? rightValue - leftValue : leftValue - rightValue;
+    });
+  }, [items, sortDirection, sortField]);
+
+  const onSort = (field: SortField) => {
+    if (field === sortField) {
+      setSortDirection((current) => (current === "desc" ? "asc" : "desc"));
+      return;
+    }
+    setSortField(field);
+    setSortDirection("desc");
+  };
+
+  const handleSelect = (row: ChannelRow) => {
+    setSelectedChannel(row.channel_handle);
+    setFilters({
+      ...filters,
+      channelHandle: row.channel_handle,
+      niche: row.channel_niche || filters.niche,
+    });
+  };
 
   return (
-    <div className="h-[calc(100vh-180px)] overflow-auto px-4 pt-4 pb-0">
-      <div className={selectedChannel ? '' : 'pb-4'}>
-        <div className="mb-3 flex items-center justify-between">
-          <div className="flex items-center gap-4">
-            <h2 className="text-sm text-foreground font-medium">Channel Rankings</h2>
+    <div className="h-[calc(100vh-180px)] overflow-auto px-4 pt-4 pb-6">
+      <div className="grid gap-4 xl:grid-cols-[minmax(0,1.45fr)_minmax(0,0.9fr)]">
+        <section className="rounded-xl border border-border bg-card">
+          <div className="flex items-center justify-between border-b border-border px-4 py-3">
+            <div>
+              <h2 className="text-sm text-foreground">Channel rankings</h2>
+              <p className="text-xs text-muted-foreground">Comparing recent vs previous windows and growth signals.</p>
+            </div>
             <div className="flex items-center gap-2 text-xs">
               <button
-                onClick={() => setCurrentPage(Math.max(1, currentPage - 1))}
-                disabled={currentPage === 1}
-                className="px-2 py-1 text-muted-foreground hover:text-primary disabled:opacity-30 disabled:cursor-not-allowed"
+                type="button"
+                onClick={() => onSort("channel_growth_score")}
+                className={sortField === "channel_growth_score" ? "text-primary" : "text-muted-foreground"}
               >
-                ←
+                Growth
               </button>
-              <span className="text-muted-foreground">
-                {currentPage} / {totalPages}
-              </span>
               <button
-                onClick={() => setCurrentPage(Math.min(totalPages, currentPage + 1))}
-                disabled={currentPage === totalPages}
-                className="px-2 py-1 text-muted-foreground hover:text-primary disabled:opacity-30 disabled:cursor-not-allowed"
+                type="button"
+                onClick={() => onSort("delta_overall_score")}
+                className={sortField === "delta_overall_score" ? "text-primary" : "text-muted-foreground"}
               >
-                →
+                Delta
               </button>
             </div>
           </div>
-        </div>
 
-        <div className="bg-card border border-border rounded-lg overflow-hidden">
-          <table className="w-full">
-            <thead className="bg-muted border-b border-border">
-              <tr className="text-[10px] text-muted-foreground uppercase tracking-wide">
-                <th className="text-left px-3 py-2">Channel</th>
-                <th className="text-left px-3 py-2">Niche</th>
-                <th className="text-left px-3 py-2">Status</th>
-                <th className="text-left px-3 py-2 cursor-pointer hover:text-primary" onClick={() => handleSort('growthScore')}>
-                  Growth {sortField === 'growthScore' && (sortDirection === 'desc' ? '↓' : '↑')}
-                </th>
-                <th className="text-left px-3 py-2 cursor-pointer hover:text-primary" onClick={() => handleSort('packagingScore')}>
-                  Packaging {sortField === 'packagingScore' && (sortDirection === 'desc' ? '↓' : '↑')}
-                </th>
-                <th className="text-left px-3 py-2 cursor-pointer hover:text-primary" onClick={() => handleSort('volatilityScore')}>
-                  Volatility {sortField === 'volatilityScore' && (sortDirection === 'desc' ? '↓' : '↑')}
-                </th>
-                <th className="text-left px-3 py-2">Delta</th>
-              </tr>
-            </thead>
-            <tbody>
-              {paginatedChannels.map((channel) => (
-                <tr
-                  key={channel.id}
-                  className={`border-b border-border hover:bg-muted/50 cursor-pointer transition ${selectedChannel?.id === channel.id ? 'bg-primary/5' : ''}`}
-                  onClick={() => setSelectedChannel(channel)}
-                >
-                  <td className="px-3 py-2.5 text-sm text-foreground">{channel.channel}</td>
-                  <td className="px-3 py-2.5 text-xs text-muted-foreground">{channel.niche}</td>
-                  <td className="px-3 py-2.5">
-                    <StatusChip status={channel.growthStatus} variant="positive" />
-                  </td>
-                  <td className="px-3 py-2.5">
-                    <div className="w-28">
-                      <ScoreBar score={channel.growthScore} variant="positive" />
-                    </div>
-                  </td>
-                  <td className="px-3 py-2.5">
-                    <div className="w-28">
-                      <ScoreBar score={channel.packagingScore} variant="positive" />
-                    </div>
-                  </td>
-                  <td className="px-3 py-2.5">
-                    <div className="w-28">
-                      <ScoreBar score={channel.volatilityScore} variant="caution" />
-                    </div>
-                  </td>
-                  <td className="px-3 py-2.5">
-                    <DeltaPill value={channel.deltaOverall} />
-                  </td>
-                </tr>
+          {loading ? (
+            <div className="space-y-3 p-4">
+              {Array.from({ length: 5 }).map((_, index) => (
+                <Skeleton key={index} className="h-16 w-full" />
               ))}
-            </tbody>
-          </table>
-        </div>
-
-        {selectedChannel && (
-          <div className="mt-4 bg-card border border-border rounded-lg p-4">
-            <div className="flex items-start justify-between mb-4">
-              <div>
-                <h3 className="mb-2 text-sm text-foreground">{selectedChannel.channel}</h3>
-                <div className="flex items-center gap-2">
-                  <span className="text-sm text-muted-foreground">{selectedChannel.niche}</span>
-                  <StatusChip status={selectedChannel.growthStatus} variant="positive" />
-                </div>
-              </div>
-              <button
-                onClick={() => setSelectedChannel(null)}
-                className="text-muted-foreground hover:text-primary text-sm"
-              >
-                ✕
-              </button>
             </div>
-
-            <div className="grid grid-cols-3 gap-6">
-              <div>
-                <h4 className="text-xs text-muted-foreground mb-2 uppercase tracking-wide">Growth Metrics</h4>
-                <div className="space-y-3">
-                  <div>
-                    <div className="text-xs text-muted-foreground mb-1">Overall growth score</div>
-                    <ScoreBar score={selectedChannel.growthScore} variant="positive" />
-                  </div>
-                  <div>
-                    <div className="text-xs text-muted-foreground mb-1">Packaging improvement</div>
-                    <ScoreBar score={selectedChannel.packagingScore} variant="positive" />
-                  </div>
-                  <div>
-                    <div className="text-xs text-muted-foreground mb-1">Sustainability</div>
-                    <ScoreBar score={selectedChannel.sustainabilityScore} variant="positive" />
-                  </div>
-                  <div>
-                    <div className="text-xs text-muted-foreground mb-1">Algorithmic shift</div>
-                    <ScoreBar score={selectedChannel.algorithmicShiftScore} variant="positive" />
-                  </div>
-                  <div>
-                    <div className="text-xs text-muted-foreground mb-1">Volatility</div>
-                    <ScoreBar score={selectedChannel.volatilityScore} variant="caution" />
-                  </div>
-                </div>
-              </div>
-
-              <div>
-                <h4 className="text-xs text-muted-foreground mb-2 uppercase tracking-wide">Recent vs Previous Window</h4>
-                <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <div className="text-xs text-muted-foreground mb-2">Recent Period</div>
-                    <div className="space-y-2 text-sm">
-                      <div>
-                        <div className="text-muted-foreground">Avg views</div>
-                        <div>{selectedChannel.recentPeriod.avgViews.toLocaleString()}</div>
-                      </div>
-                      <div>
-                        <div className="text-muted-foreground">Engagement</div>
-                        <div>{(selectedChannel.recentPeriod.avgEngagement * 100).toFixed(1)}%</div>
-                      </div>
-                      <div>
-                        <div className="text-muted-foreground">Videos</div>
-                        <div>{selectedChannel.recentPeriod.videoCount}</div>
-                      </div>
-                    </div>
-                  </div>
-                  <div>
-                    <div className="text-xs text-muted-foreground mb-2">Previous Period</div>
-                    <div className="space-y-2 text-sm">
-                      <div>
-                        <div className="text-muted-foreground">Avg views</div>
-                        <div>{selectedChannel.previousPeriod.avgViews.toLocaleString()}</div>
-                      </div>
-                      <div>
-                        <div className="text-muted-foreground">Engagement</div>
-                        <div>{(selectedChannel.previousPeriod.avgEngagement * 100).toFixed(1)}%</div>
-                      </div>
-                      <div>
-                        <div className="text-muted-foreground">Videos</div>
-                        <div>{selectedChannel.previousPeriod.videoCount}</div>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-              <div>
-                <h4 className="text-xs text-muted-foreground mb-2 uppercase tracking-wide">Period Comparison</h4>
-                <div className="space-y-2">
-                  <div className="flex items-center justify-between text-sm">
-                    <span className="text-muted-foreground">Views change</span>
-                    <DeltaPill
-                      value={Math.round(
-                        ((selectedChannel.recentPeriod.avgViews - selectedChannel.previousPeriod.avgViews) /
-                          selectedChannel.previousPeriod.avgViews) *
-                          100
-                      )}
-                    />
-                  </div>
-                  <div className="flex items-center justify-between text-sm">
-                    <span className="text-muted-foreground">Engagement change</span>
-                    <DeltaPill
-                      value={Math.round(
-                        ((selectedChannel.recentPeriod.avgEngagement - selectedChannel.previousPeriod.avgEngagement) /
-                          selectedChannel.previousPeriod.avgEngagement) *
-                          100
-                      )}
-                    />
-                  </div>
-                  <div className="flex items-center justify-between text-sm">
-                    <span className="text-muted-foreground">Output change</span>
-                    <DeltaPill
-                      value={selectedChannel.recentPeriod.videoCount - selectedChannel.previousPeriod.videoCount}
-                    />
-                  </div>
-                </div>
-              </div>
+          ) : error ? (
+            <div className="p-4 text-sm text-critical">{error}</div>
+          ) : sortedItems.length === 0 ? (
+            <div className="p-4 text-sm text-muted-foreground">No channels match the current filters.</div>
+          ) : (
+            <div className="overflow-hidden">
+              <table className="w-full">
+                <thead className="border-b border-border bg-muted/40 text-[10px] uppercase tracking-wide text-muted-foreground">
+                  <tr>
+                    <th className="px-4 py-2 text-left">Channel</th>
+                    <th className="px-4 py-2 text-left">Niche</th>
+                    <th className="px-4 py-2 text-left">Status</th>
+                    <th className="px-4 py-2 text-left">Growth</th>
+                    <th className="px-4 py-2 text-left">Packaging</th>
+                    <th className="px-4 py-2 text-left">Volatility</th>
+                    <th className="px-4 py-2 text-left">Delta</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {sortedItems.map((row) => (
+                    <tr
+                      key={row.channel_handle}
+                      onClick={() => handleSelect(row)}
+                      className={`cursor-pointer border-b border-border transition hover:bg-muted/30 ${
+                        selectedChannel === row.channel_handle ? "bg-primary/5" : ""
+                      }`}
+                    >
+                      <td className="px-4 py-3">
+                        <div className="text-sm text-foreground">{row.channel_handle}</div>
+                        <div className="mt-1 text-[10px] uppercase tracking-wide text-muted-foreground">
+                          {titleCase(filters.analysisWindow ? `${filters.analysisWindow} day window` : "Latest")}
+                        </div>
+                      </td>
+                      <td className="px-4 py-3 text-sm text-muted-foreground">{row.channel_niche || "Uncategorized"}</td>
+                      <td className="px-4 py-3">
+                        <StatusChip status={row.channel_growth_status} variant={scoreVariant(row.channel_growth_score)} />
+                      </td>
+                      <td className="px-4 py-3">
+                        <div className="w-28">
+                          <ScoreBar score={scoreValue(row.channel_growth_score)} variant="positive" />
+                        </div>
+                      </td>
+                      <td className="px-4 py-3">
+                        <div className="w-28">
+                          <ScoreBar score={scoreValue(row.channel_packaging_improvement_score)} variant="positive" />
+                        </div>
+                      </td>
+                      <td className="px-4 py-3">
+                        <div className="w-28">
+                          <ScoreBar score={scoreValue(row.channel_volatility_score)} variant="caution" />
+                        </div>
+                      </td>
+                      <td className="px-4 py-3">
+                        <DeltaPill value={Math.round((row.delta_overall_score ?? 0) * 100)} />
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
             </div>
+          )}
+        </section>
 
-            {selectedChannel.algorithmicShiftScore > 0.7 && (
-              <div className="mt-4 p-3 bg-positive/10 border border-positive/30 rounded text-xs text-positive-foreground">
-                ✓ Strong algorithmic shift detected. This channel may have found a new winning format.
-              </div>
-            )}
+        <aside className="rounded-xl border border-border bg-card p-4">
+          <div className="mb-4">
+            <h3 className="text-sm text-foreground">Channel detail</h3>
+            <p className="text-xs text-muted-foreground">Recent vs previous window, improvement scores, and volatility.</p>
           </div>
-        )}
+
+          {!selectedRow ? (
+            <div className="rounded-lg border border-dashed border-border p-4 text-sm text-muted-foreground">
+              Select a channel to inspect trend changes and the latest videos.
+            </div>
+          ) : detailLoading ? (
+            <div className="space-y-3">
+              <Skeleton className="h-24 w-full" />
+              <Skeleton className="h-20 w-full" />
+              <Skeleton className="h-20 w-full" />
+            </div>
+          ) : (
+            <div className="space-y-4">
+              <div className="rounded-lg border border-border bg-background/40 p-3">
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <div className="text-base text-foreground">{selectedRow.channel_handle}</div>
+                    <div className="mt-2 flex flex-wrap items-center gap-2">
+                      <StatusChip status={selectedRow.channel_growth_status} variant={scoreVariant(selectedRow.channel_growth_score)} />
+                      <ConfidenceBadge confidence={selectedRow.sample_confidence_level} />
+                      <span className="text-xs text-muted-foreground">{selectedRow.channel_niche || "Uncategorized"}</span>
+                    </div>
+                  </div>
+                  <Sparkline
+                    data={[
+                      selectedRow.channel_packaging_improvement_score ?? 0,
+                      selectedRow.channel_sustainability_improvement_score ?? 0,
+                      selectedRow.channel_algorithmic_shift_score ?? 0,
+                    ]}
+                  />
+                </div>
+
+                <div className="mt-4 grid gap-3 sm:grid-cols-2">
+                  <div>
+                    <div className="mb-1 text-xs text-muted-foreground">Growth score</div>
+                    <ScoreBar score={selectedRow.channel_growth_score ?? 0} variant="positive" />
+                  </div>
+                  <div>
+                    <div className="mb-1 text-xs text-muted-foreground">Packaging improvement</div>
+                    <ScoreBar score={selectedRow.channel_packaging_improvement_score ?? 0} variant="positive" />
+                  </div>
+                  <div>
+                    <div className="mb-1 text-xs text-muted-foreground">Sustainability improvement</div>
+                    <ScoreBar score={selectedRow.channel_sustainability_improvement_score ?? 0} variant="positive" />
+                  </div>
+                  <div>
+                    <div className="mb-1 text-xs text-muted-foreground">Volatility</div>
+                    <ScoreBar score={selectedRow.channel_volatility_score ?? 0} variant="caution" />
+                  </div>
+                </div>
+              </div>
+
+              <div className="grid gap-3 sm:grid-cols-2">
+                <div className="rounded-lg border border-border bg-background/40 p-3">
+                  <div className="text-[10px] uppercase tracking-wide text-muted-foreground">Recent videos</div>
+                  <div className="mt-1 text-lg text-foreground">{selectedRow.video_count_recent}</div>
+                </div>
+                <div className="rounded-lg border border-border bg-background/40 p-3">
+                  <div className="text-[10px] uppercase tracking-wide text-muted-foreground">Previous videos</div>
+                  <div className="mt-1 text-lg text-foreground">{selectedRow.video_count_previous}</div>
+                </div>
+              </div>
+
+              <div className="rounded-lg border border-border bg-background/40 p-3">
+                <div className="mb-2 text-xs uppercase tracking-wide text-muted-foreground">Window comparison</div>
+                <div className="space-y-2 text-sm">
+                    <div className="flex items-center justify-between">
+                      <span className="text-muted-foreground">Median overall score</span>
+                      <span className="text-foreground">
+                      {formatScore(selectedRow.median_overall_score_previous)} {"->"} {formatScore(selectedRow.median_overall_score_recent)}
+                      </span>
+                    </div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-muted-foreground">Delta overall score</span>
+                    <DeltaPill value={Math.round((selectedRow.delta_overall_score ?? 0) * 100)} />
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-muted-foreground">Delta momentum</span>
+                    <DeltaPill value={Math.round((selectedRow.delta_momentum_score ?? 0) * 100)} />
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-muted-foreground">Delta packaging</span>
+                    <DeltaPill value={Math.round((selectedRow.delta_packaging_score ?? 0) * 100)} />
+                  </div>
+                </div>
+              </div>
+
+              {selectedRow.channel_growth_status === "algorithmic_shift" ? (
+                <div className="rounded-lg border border-positive/30 bg-positive/10 p-3 text-xs text-positive-foreground">
+                  Strong algorithmic shift detected. This channel may have found a new winning format.
+                </div>
+              ) : null}
+
+              {selectedRow.sample_confidence_level !== "high" ? (
+                <div className="rounded-lg border border-caution/30 bg-caution/10 p-3 text-xs text-caution-foreground">
+                  Low sample confidence. Use the delta signals as directional evidence only.
+                </div>
+              ) : null}
+
+              <div className="rounded-lg border border-border bg-background/40 p-3">
+                <div className="mb-2 text-xs uppercase tracking-wide text-muted-foreground">Recent videos</div>
+                <div className="space-y-2">
+                  {(detailData?.recent_videos ?? []).length === 0 ? (
+                    <div className="text-sm text-muted-foreground">No recent videos resolved for this channel.</div>
+                  ) : (
+                    (detailData?.recent_videos ?? []).map((video) => (
+                      <div key={video.video_id} className="rounded-md border border-border px-3 py-2">
+                        <div className="text-sm text-foreground">{video.title}</div>
+                        <div className="mt-1 flex items-center gap-2 text-[10px] uppercase tracking-wide text-muted-foreground">
+                          <span>{video.performance_label || "unclassified"}</span>
+                          <span>{video.channel_niche || "Uncategorized"}</span>
+                        </div>
+                      </div>
+                    ))
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
+        </aside>
       </div>
     </div>
   );

@@ -1,335 +1,316 @@
-import { useState, useEffect, useMemo } from 'react';
-import { useLocation } from 'react-router';
-import { useFilters } from '../../contexts/FilterContext';
-import { StatusChip } from '../ui/StatusChip';
-import { ConfidenceBadge } from '../ui/ConfidenceBadge';
-import { ScoreBar } from '../ui/ScoreBar';
-import { Sparkline } from '../ui/Sparkline';
+import { useEffect, useMemo, useState } from "react";
+import { useLocation } from "react-router";
+import { useFilters } from "../../contexts/FilterContext";
+import {
+  buildDashboardQuery,
+  ConfidenceLevel,
+  NicheDetailResponse,
+  NicheRow,
+  formatPercent,
+  titleCase,
+} from "../../lib/dashboard";
+import { useDashboardQuery } from "../../lib/useDashboardQuery";
+import { ConfidenceBadge } from "../ui/ConfidenceBadge";
+import { ScoreBar } from "../ui/ScoreBar";
+import { Sparkline } from "../ui/Sparkline";
+import { StatusChip } from "../ui/StatusChip";
+import { Skeleton } from "../ui/skeleton";
 
-interface Niche {
-  id: string;
-  niche: string;
-  growthStatus: string;
-  earlyScore: number;
-  confirmedScore: number;
-  confidence: 'high' | 'medium' | 'low';
-  distinctChannels: number;
-  totalVideos: number;
-  trend: number[];
-  sampleSize: number;
-  recentChannels: string[];
-  topTopics: string[];
+type SortField = "niche_growth_score_confirmed" | "niche_early_signal_score" | "video_count_total" | "distinct_channels_count";
+
+function scoreValue(value: number | null | undefined) {
+  return value ?? 0;
+}
+
+function scoreVariant(value: number | null | undefined): "positive" | "caution" | "critical" {
+  if (value === null || value === undefined) {
+    return "critical";
+  }
+  if (value >= 0.8) {
+    return "positive";
+  }
+  if (value >= 0.6) {
+    return "caution";
+  }
+  return "critical";
 }
 
 export function Niches() {
   const location = useLocation();
-  const { filters } = useFilters();
-  const [selectedNiche, setSelectedNiche] = useState<Niche | null>(null);
-  const [sortField, setSortField] = useState<'earlyScore' | 'confirmedScore'>('earlyScore');
-  const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('desc');
-  const [currentPage, setCurrentPage] = useState(1);
-  const itemsPerPage = 5;
+  const { filters, setFilters } = useFilters();
+  const [selectedNiche, setSelectedNiche] = useState<string | null>(null);
+  const [sortField, setSortField] = useState<SortField>("niche_growth_score_confirmed");
+  const [sortDirection, setSortDirection] = useState<"asc" | "desc">("desc");
 
-  const niches: Niche[] = [
-    {
-      id: '1',
-      niche: 'us iran geopolitics',
-      growthStatus: 'fast_emerging',
-      earlyScore: 0.82,
-      confirmedScore: 0.74,
-      confidence: 'high',
-      distinctChannels: 11,
-      totalVideos: 48,
-      trend: [0.45, 0.52, 0.61, 0.68, 0.74, 0.82],
-      sampleSize: 48,
-      recentChannels: ['@MeidasTouch', '@TheGeoNetwork', '@BrianTylerCohen'],
-      topTopics: ['trump foreign policy', 'middle east escalation', 'iran nuclear deal'],
-    },
-    {
-      id: '2',
-      niche: 'bitcoin etf flows',
-      growthStatus: 'confirmed',
-      earlyScore: 0.76,
-      confirmedScore: 0.81,
-      confidence: 'high',
-      distinctChannels: 14,
-      totalVideos: 62,
-      trend: [0.68, 0.71, 0.73, 0.76, 0.79, 0.81],
-      sampleSize: 62,
-      recentChannels: ['@CoinBureauFinance', '@CryptosRUs', '@AltcoinDaily'],
-      topTopics: ['bitcoin etf inflows', 'institutional adoption', 'etf approval impact'],
-    },
-    {
-      id: '3',
-      niche: 'spanish housing market',
-      growthStatus: 'fast_emerging',
-      earlyScore: 0.71,
-      confirmedScore: 0.65,
-      confidence: 'medium',
-      distinctChannels: 7,
-      totalVideos: 31,
-      trend: [0.42, 0.48, 0.55, 0.61, 0.65, 0.71],
-      sampleSize: 31,
-      recentChannels: ['@EconomicsExplained', '@MoneyMacro', '@RealEstate'],
-      topTopics: ['spanish property prices', 'barcelona housing crisis', 'european real estate'],
-    },
-    {
-      id: '4',
-      niche: 'ai agent frameworks',
-      growthStatus: 'fast_emerging',
-      earlyScore: 0.88,
-      confirmedScore: 0.69,
-      confidence: 'medium',
-      distinctChannels: 9,
-      totalVideos: 37,
-      trend: [0.51, 0.58, 0.63, 0.72, 0.81, 0.88],
-      sampleSize: 37,
-      recentChannels: ['@TwoMinutePapers', '@YannicKilcher', '@AIExplained'],
-      topTopics: ['langchain tutorials', 'autonomous agents', 'ai coding assistants'],
-    },
-    {
-      id: '5',
-      niche: 'south china sea tensions',
-      growthStatus: 'confirmed',
-      earlyScore: 0.73,
-      confirmedScore: 0.78,
-      confidence: 'high',
-      distinctChannels: 10,
-      totalVideos: 44,
-      trend: [0.65, 0.68, 0.71, 0.74, 0.76, 0.78],
-      sampleSize: 44,
-      recentChannels: ['@TheGeoNetwork', '@CaspianReport', '@PolyMatter'],
-      topTopics: ['china taiwan conflict', 'philippines dispute', 'us china military'],
-    },
-  ];
+  const query = useMemo(() => buildDashboardQuery(filters, { limit: 250 }), [filters]);
+  const { data, loading, error } = useDashboardQuery<{ items: NicheRow[] }>("/api/dashboard/niches", query);
 
-  const filteredNiches = useMemo(() => {
-    return niches.filter(niche => {
-      if (filters.niche && !niche.niche.toLowerCase().includes(filters.niche.toLowerCase())) {
-        return false;
-      }
-      if (filters.nicheGrowthStatus && niche.growthStatus !== filters.nicheGrowthStatus) {
-        return false;
-      }
-      if (filters.sampleConfidence && niche.confidence !== filters.sampleConfidence) {
-        return false;
-      }
-      return true;
-    });
-  }, [niches, filters]);
-
-  const sortedNiches = [...filteredNiches].sort((a, b) => {
-    const aVal = a[sortField];
-    const bVal = b[sortField];
-    return sortDirection === 'desc' ? bVal - aVal : aVal - bVal;
-  });
-
-  const totalPages = Math.ceil(sortedNiches.length / itemsPerPage);
-  const paginatedNiches = sortedNiches.slice(
-    (currentPage - 1) * itemsPerPage,
-    currentPage * itemsPerPage
-  );
-
-  const handleSort = (field: 'earlyScore' | 'confirmedScore') => {
-    if (sortField === field) {
-      setSortDirection(sortDirection === 'desc' ? 'asc' : 'desc');
-    } else {
-      setSortField(field);
-      setSortDirection('desc');
-    }
-  };
+  const items = data?.items ?? [];
 
   useEffect(() => {
-    if (location.state?.selectedId) {
-      const niche = niches.find(n => n.id === location.state.selectedId);
-      if (niche) {
-        setSelectedNiche(niche);
-      }
+    const initial = (location.state as { selectedId?: string } | null | undefined)?.selectedId;
+    if (initial && items.some((row) => row.niche === initial)) {
+      setSelectedNiche(initial);
+      return;
     }
-  }, [location.state]);
+    if (!selectedNiche && items.length > 0) {
+      setSelectedNiche(items[0].niche);
+    }
+  }, [items, location.state, selectedNiche]);
+
+  useEffect(() => {
+    if (selectedNiche && !items.some((row) => row.niche === selectedNiche)) {
+      setSelectedNiche(items[0]?.niche ?? null);
+    }
+  }, [items, selectedNiche]);
+
+  const selectedRow = useMemo(
+    () => items.find((row) => row.niche === selectedNiche) ?? null,
+    [items, selectedNiche],
+  );
+
+  const detailQuery = useMemo(
+    () => buildDashboardQuery(filters, { niche: selectedRow?.niche ?? selectedNiche ?? "" }),
+    [filters, selectedRow?.niche, selectedNiche],
+  );
+  const { data: detailData, loading: detailLoading } = useDashboardQuery<NicheDetailResponse>(
+    selectedRow?.niche ? "/api/dashboard/niche-detail" : "/api/dashboard/niche-detail",
+    detailQuery,
+  );
+
+  const sortedItems = useMemo(() => {
+    return [...items].sort((left, right) => {
+      const leftValue = scoreValue(left[sortField]);
+      const rightValue = scoreValue(right[sortField]);
+      return sortDirection === "desc" ? rightValue - leftValue : leftValue - rightValue;
+    });
+  }, [items, sortDirection, sortField]);
+
+  const onSort = (field: SortField) => {
+    if (field === sortField) {
+      setSortDirection((current) => (current === "desc" ? "asc" : "desc"));
+      return;
+    }
+    setSortField(field);
+    setSortDirection("desc");
+  };
+
+  const handleSelect = (row: NicheRow) => {
+    setSelectedNiche(row.niche);
+    setFilters({ ...filters, niche: row.niche });
+  };
 
   return (
-    <div className="h-[calc(100vh-180px)] overflow-auto px-4 pt-4 pb-0">
-      <div className={selectedNiche ? '' : 'pb-4'}>
-        <div className="mb-3 flex items-center justify-between">
-          <div className="flex items-center gap-4">
-            <h2 className="text-sm text-foreground font-medium">Niche Rankings</h2>
+    <div className="h-[calc(100vh-180px)] overflow-auto px-4 pt-4 pb-6">
+      <div className="grid gap-4 xl:grid-cols-[minmax(0,1.45fr)_minmax(0,0.9fr)]">
+        <section className="rounded-xl border border-border bg-card">
+          <div className="flex items-center justify-between border-b border-border px-4 py-3">
+            <div>
+              <h2 className="text-sm text-foreground">Niche rankings</h2>
+              <p className="text-xs text-muted-foreground">Ranked by confirmed growth, early signal, and sample quality.</p>
+            </div>
             <div className="flex items-center gap-2 text-xs">
               <button
-                onClick={() => setCurrentPage(Math.max(1, currentPage - 1))}
-                disabled={currentPage === 1}
-                className="px-2 py-1 text-muted-foreground hover:text-primary disabled:opacity-30 disabled:cursor-not-allowed"
+                type="button"
+                onClick={() => onSort("niche_early_signal_score")}
+                className={sortField === "niche_early_signal_score" ? "text-primary" : "text-muted-foreground"}
               >
-                ←
+                Early
               </button>
-              <span className="text-muted-foreground">
-                {currentPage} / {totalPages}
-              </span>
               <button
-                onClick={() => setCurrentPage(Math.min(totalPages, currentPage + 1))}
-                disabled={currentPage === totalPages}
-                className="px-2 py-1 text-muted-foreground hover:text-primary disabled:opacity-30 disabled:cursor-not-allowed"
+                type="button"
+                onClick={() => onSort("niche_growth_score_confirmed")}
+                className={sortField === "niche_growth_score_confirmed" ? "text-primary" : "text-muted-foreground"}
               >
-                →
+                Confirmed
               </button>
             </div>
           </div>
-          <div className="flex items-center gap-2 text-xs">
-            <span className="text-muted-foreground">Comparison:</span>
-            <button
-              className={`px-2.5 py-1 rounded ${sortField === 'earlyScore' ? 'bg-primary/10 text-primary' : 'text-muted-foreground hover:text-primary'}`}
-              onClick={() => handleSort('earlyScore')}
-            >
-              Early signal
-            </button>
-            <button
-              className={`px-2.5 py-1 rounded ${sortField === 'confirmedScore' ? 'bg-primary/10 text-primary' : 'text-muted-foreground hover:text-primary'}`}
-              onClick={() => handleSort('confirmedScore')}
-            >
-              Confirmed
-            </button>
-          </div>
-        </div>
 
-        <div className="bg-card border border-border rounded-lg overflow-hidden">
-          <table className="w-full">
-            <thead className="bg-muted border-b border-border">
-              <tr className="text-[10px] text-muted-foreground uppercase tracking-wide">
-                <th className="text-left px-3 py-2">Niche</th>
-                <th className="text-left px-3 py-2">Status</th>
-                <th className="text-left px-3 py-2 cursor-pointer hover:text-primary" onClick={() => handleSort('earlyScore')}>
-                  Early Score {sortField === 'earlyScore' && (sortDirection === 'desc' ? '↓' : '↑')}
-                </th>
-                <th className="text-left px-3 py-2 cursor-pointer hover:text-primary" onClick={() => handleSort('confirmedScore')}>
-                  Confirmed Score {sortField === 'confirmedScore' && (sortDirection === 'desc' ? '↓' : '↑')}
-                </th>
-                <th className="text-left px-3 py-2">Confidence</th>
-                <th className="text-left px-3 py-2">Channels</th>
-                <th className="text-left px-3 py-2">Videos</th>
-                <th className="text-left px-3 py-2">Trend</th>
-              </tr>
-            </thead>
-            <tbody>
-              {paginatedNiches.map((niche) => (
-                <tr
-                  key={niche.id}
-                  className={`border-b border-border hover:bg-muted/50 cursor-pointer transition ${selectedNiche?.id === niche.id ? 'bg-primary/5' : ''}`}
-                  onClick={() => setSelectedNiche(niche)}
-                >
-                  <td className="px-3 py-2.5 text-sm text-foreground">{niche.niche}</td>
-                  <td className="px-3 py-2.5">
-                    <StatusChip status={niche.growthStatus} variant="positive" />
-                  </td>
-                  <td className="px-3 py-2.5">
-                    <div className="w-28">
-                      <ScoreBar score={niche.earlyScore} variant="positive" />
-                    </div>
-                  </td>
-                  <td className="px-3 py-2.5">
-                    <div className="w-28">
-                      <ScoreBar score={niche.confirmedScore} variant="positive" />
-                    </div>
-                  </td>
-                  <td className="px-3 py-2.5">
-                    <ConfidenceBadge confidence={niche.confidence} />
-                  </td>
-                  <td className="px-3 py-2.5 text-xs text-muted-foreground">{niche.distinctChannels}</td>
-                  <td className="px-3 py-2.5 text-xs text-muted-foreground">{niche.totalVideos}</td>
-                  <td className="px-3 py-2.5">
-                    <Sparkline data={niche.trend} variant="positive" />
-                  </td>
-                </tr>
+          {loading ? (
+            <div className="space-y-3 p-4">
+              {Array.from({ length: 5 }).map((_, index) => (
+                <Skeleton key={index} className="h-16 w-full" />
               ))}
-            </tbody>
-          </table>
-        </div>
-
-        {selectedNiche && (
-          <div className="mt-4 bg-card border border-border rounded-lg p-4">
-            <div className="flex items-start justify-between mb-4">
-              <div>
-                <h3 className="mb-2 text-sm text-foreground">{selectedNiche.niche}</h3>
-                <div className="flex items-center gap-2">
-                  <StatusChip status={selectedNiche.growthStatus} variant="positive" />
-                  <ConfidenceBadge confidence={selectedNiche.confidence} />
-                </div>
-              </div>
-              <button
-                onClick={() => setSelectedNiche(null)}
-                className="text-muted-foreground hover:text-primary text-sm"
-              >
-                ✕
-              </button>
             </div>
-
-            <div className="grid grid-cols-4 gap-6">
-              <div>
-                <h4 className="text-xs text-muted-foreground mb-2 uppercase tracking-wide">Score Comparison</h4>
-                <div className="space-y-3">
-                  <div>
-                    <div className="text-xs text-muted-foreground mb-1">Early signal score</div>
-                    <ScoreBar score={selectedNiche.earlyScore} variant="positive" />
-                  </div>
-                  <div>
-                    <div className="text-xs text-muted-foreground mb-1">Confirmed growth score</div>
-                    <ScoreBar score={selectedNiche.confirmedScore} variant="positive" />
-                  </div>
-                </div>
-              </div>
-
-              <div>
-                <h4 className="text-xs text-muted-foreground mb-2 uppercase tracking-wide">Trend Analysis</h4>
-                <div className="bg-muted/30 rounded p-4 flex items-center justify-center">
-                  <Sparkline data={selectedNiche.trend} variant="positive" />
-                </div>
-                <div className="mt-2 text-xs text-muted-foreground">
-                  Growth trajectory over last 30 days
-                </div>
-              </div>
-
-              <div>
-                <h4 className="text-xs text-muted-foreground mb-2 uppercase tracking-wide">Sample Details</h4>
-                <div className="grid grid-cols-2 gap-3 text-sm">
-                  <div>
-                    <div className="text-muted-foreground mb-1">Sample size</div>
-                    <div>{selectedNiche.sampleSize} videos</div>
-                  </div>
-                  <div>
-                    <div className="text-muted-foreground mb-1">Distinct channels</div>
-                    <div>{selectedNiche.distinctChannels}</div>
-                  </div>
-                </div>
-                {selectedNiche.confidence === 'low' && (
-                  <div className="mt-3 p-3 bg-caution/10 border border-caution/30 rounded text-xs text-caution-foreground">
-                    ⚠️ Low sample size may affect accuracy
-                  </div>
-                )}
-              </div>
-
-              <div>
-                <h4 className="text-xs text-muted-foreground mb-2 uppercase tracking-wide">Active Channels</h4>
-                <div className="space-y-2">
-                  {selectedNiche.recentChannels.map((channel) => (
-                    <div key={channel} className="text-sm bg-muted/30 rounded px-3 py-2">
-                      {channel}
-                    </div>
+          ) : error ? (
+            <div className="p-4 text-sm text-critical">{error}</div>
+          ) : sortedItems.length === 0 ? (
+            <div className="p-4 text-sm text-muted-foreground">No niches match the current filters.</div>
+          ) : (
+            <div className="overflow-hidden">
+              <table className="w-full">
+                <thead className="border-b border-border bg-muted/40 text-[10px] uppercase tracking-wide text-muted-foreground">
+                  <tr>
+                    <th className="px-4 py-2 text-left">Niche</th>
+                    <th className="px-4 py-2 text-left">Status</th>
+                    <th className="px-4 py-2 text-left">Early</th>
+                    <th className="px-4 py-2 text-left">Confirmed</th>
+                    <th className="px-4 py-2 text-left">Confidence</th>
+                    <th className="px-4 py-2 text-left">Channels</th>
+                    <th className="px-4 py-2 text-left">Videos</th>
+                    <th className="px-4 py-2 text-left">Trend</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {sortedItems.map((row) => (
+                    <tr
+                      key={row.niche}
+                      onClick={() => handleSelect(row)}
+                      className={`cursor-pointer border-b border-border transition hover:bg-muted/30 ${
+                        selectedNiche === row.niche ? "bg-primary/5" : ""
+                      }`}
+                    >
+                      <td className="px-4 py-3">
+                        <div className="text-sm text-foreground">{row.niche}</div>
+                        <div className="mt-1 text-[10px] uppercase tracking-wide text-muted-foreground">
+                          {titleCase(filters.analysisWindow ? `${filters.analysisWindow} day window` : "Latest")}
+                        </div>
+                      </td>
+                      <td className="px-4 py-3">
+                        <StatusChip status={row.niche_growth_status_confirmed} variant={scoreVariant(row.niche_growth_score_confirmed)} />
+                      </td>
+                      <td className="px-4 py-3">
+                        <div className="w-28">
+                          <ScoreBar score={scoreValue(row.niche_early_signal_score)} variant="positive" />
+                        </div>
+                      </td>
+                      <td className="px-4 py-3">
+                        <div className="w-28">
+                          <ScoreBar score={scoreValue(row.niche_growth_score_confirmed)} variant="positive" />
+                        </div>
+                      </td>
+                      <td className="px-4 py-3">
+                        <ConfidenceBadge confidence={row.sample_confidence_level} />
+                      </td>
+                      <td className="px-4 py-3 text-sm text-muted-foreground">{row.distinct_channels_count}</td>
+                      <td className="px-4 py-3 text-sm text-muted-foreground">{row.video_count_total}</td>
+                      <td className="px-4 py-3">
+                        <Sparkline
+                          data={[
+                            row.niche_early_signal_score ?? 0,
+                            row.niche_growth_forecast_score ?? 0,
+                            row.niche_growth_score_confirmed ?? 0,
+                          ]}
+                        />
+                      </td>
+                    </tr>
                   ))}
-                </div>
-              </div>
-
-              <div>
-                <h4 className="text-xs text-muted-foreground mb-2 uppercase tracking-wide">Top Topics</h4>
-                <div className="space-y-2">
-                  {selectedNiche.topTopics.map((topic) => (
-                    <div key={topic} className="text-sm bg-muted/30 rounded px-3 py-2">
-                      {topic}
-                    </div>
-                  ))}
-                </div>
-              </div>
+                </tbody>
+              </table>
             </div>
+          )}
+        </section>
+
+        <aside className="rounded-xl border border-border bg-card p-4">
+          <div className="mb-4">
+            <h3 className="text-sm text-foreground">Niche detail</h3>
+            <p className="text-xs text-muted-foreground">Early vs confirmed signal, confidence, and supporting entities.</p>
           </div>
-        )}
+
+          {!selectedRow ? (
+            <div className="rounded-lg border border-dashed border-border p-4 text-sm text-muted-foreground">
+              Select a niche to inspect the supporting channels and topics.
+            </div>
+          ) : detailLoading ? (
+            <div className="space-y-3">
+              <Skeleton className="h-24 w-full" />
+              <Skeleton className="h-20 w-full" />
+              <Skeleton className="h-20 w-full" />
+            </div>
+          ) : (
+            <div className="space-y-4">
+              <div className="rounded-lg border border-border bg-background/40 p-3">
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <div className="text-base text-foreground">{selectedRow.niche}</div>
+                    <div className="mt-2 flex flex-wrap items-center gap-2">
+                      <StatusChip status={selectedRow.niche_growth_status_early} variant={scoreVariant(selectedRow.niche_early_signal_score)} />
+                      <StatusChip status={selectedRow.niche_growth_status_confirmed} variant={scoreVariant(selectedRow.niche_growth_score_confirmed)} />
+                      <ConfidenceBadge confidence={selectedRow.sample_confidence_level} />
+                    </div>
+                  </div>
+                </div>
+
+                <div className="mt-4 grid gap-3 sm:grid-cols-2">
+                  <div>
+                    <div className="mb-1 text-xs text-muted-foreground">Early signal</div>
+                    <ScoreBar score={selectedRow.niche_early_signal_score ?? 0} variant="positive" />
+                  </div>
+                  <div>
+                    <div className="mb-1 text-xs text-muted-foreground">Confirmed growth</div>
+                    <ScoreBar score={selectedRow.niche_growth_score_confirmed ?? 0} variant="positive" />
+                  </div>
+                  <div>
+                    <div className="mb-1 text-xs text-muted-foreground">Acceleration</div>
+                    <ScoreBar score={selectedRow.niche_acceleration_score_confirmed ?? 0} variant="positive" />
+                  </div>
+                  <div>
+                    <div className="mb-1 text-xs text-muted-foreground">Outlier dependency</div>
+                    <ScoreBar score={selectedRow.niche_outlier_dependency_score ?? 0} variant="caution" />
+                  </div>
+                </div>
+              </div>
+
+              <div className="grid gap-3 sm:grid-cols-2">
+                <div className="rounded-lg border border-border bg-background/40 p-3">
+                  <div className="text-[10px] uppercase tracking-wide text-muted-foreground">Sample size</div>
+                  <div className="mt-1 text-lg text-foreground">{selectedRow.video_count_total}</div>
+                </div>
+                <div className="rounded-lg border border-border bg-background/40 p-3">
+                  <div className="text-[10px] uppercase tracking-wide text-muted-foreground">Distinct channels</div>
+                  <div className="mt-1 text-lg text-foreground">{selectedRow.distinct_channels_count}</div>
+                </div>
+              </div>
+
+              {selectedRow.sample_confidence_level !== "high" ? (
+                <div className="rounded-lg border border-caution/30 bg-caution/10 p-3 text-xs text-caution-foreground">
+                  Low sample confidence. Treat this niche as directional rather than confirmed.
+                </div>
+              ) : null}
+
+              {selectedRow.notes ? (
+                <div className="rounded-lg border border-border bg-background/40 p-3 text-sm text-muted-foreground">
+                  {selectedRow.notes}
+                </div>
+              ) : null}
+
+              <div className="rounded-lg border border-border bg-background/40 p-3">
+                <div className="mb-2 text-xs uppercase tracking-wide text-muted-foreground">Recent channels</div>
+                <div className="space-y-2">
+                  {(detailData?.recent_channels ?? []).length === 0 ? (
+                    <div className="text-sm text-muted-foreground">No supporting channels resolved for this niche.</div>
+                  ) : (
+                    (detailData?.recent_channels ?? []).map((row) => (
+                      <div key={row.channel_handle} className="rounded-md border border-border px-3 py-2 text-sm text-foreground">
+                        <div>{row.channel_handle}</div>
+                        <div className="mt-1 text-[10px] uppercase tracking-wide text-muted-foreground">
+                          {row.channel_niche || "Uncategorized"} · {row.channel_growth_status}
+                        </div>
+                      </div>
+                    ))
+                  )}
+                </div>
+              </div>
+
+              <div className="rounded-lg border border-border bg-background/40 p-3">
+                <div className="mb-2 text-xs uppercase tracking-wide text-muted-foreground">Top topics</div>
+                <div className="space-y-2">
+                  {(detailData?.top_topics ?? []).length === 0 ? (
+                    <div className="text-sm text-muted-foreground">No topic clusters resolved for this niche.</div>
+                  ) : (
+                    (detailData?.top_topics ?? []).map((topic) => (
+                      <div key={topic.label} className="flex items-center justify-between rounded-md border border-border px-3 py-2 text-sm">
+                        <span className="text-foreground">{topic.label}</span>
+                        <span className="text-muted-foreground">{topic.count}</span>
+                      </div>
+                    ))
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
+        </aside>
       </div>
     </div>
   );

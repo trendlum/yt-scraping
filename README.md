@@ -134,6 +134,14 @@ Notas operativas:
 - Si quieres cambiar frecuencia o ventana de analisis, modifica el cron o las variables del repositorio sin tocar el codigo Python.
 - `--feature-workers` controla el paralelismo del enriquecimiento por video. El valor por defecto es `8`.
 
+## Dashboard
+
+Comando principal desde la raiz del repo:
+
+```bash
+npm run dashboard:dev
+```
+
 ## Limitaciones actuales
 
 - `dominant_emotion` sigue sin extraerse; permanece `null`.

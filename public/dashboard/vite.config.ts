@@ -30,6 +30,22 @@ export default defineConfig({
       '@': path.resolve(__dirname, './src'),
     },
   },
+  server: {
+    proxy: {
+      '/api': {
+        target: process.env.DASHBOARD_API_PROXY_TARGET || 'http://127.0.0.1:8787',
+        changeOrigin: true,
+      },
+    },
+  },
+  preview: {
+    proxy: {
+      '/api': {
+        target: process.env.DASHBOARD_API_PROXY_TARGET || 'http://127.0.0.1:8787',
+        changeOrigin: true,
+      },
+    },
+  },
 
   // File types to support raw imports. Never add .css, .tsx, or .ts files to this.
   assetsInclude: ['**/*.svg', '**/*.csv'],

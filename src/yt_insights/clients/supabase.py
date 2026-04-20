@@ -35,7 +35,7 @@ class SupabaseClient:
         method: str,
         path: str,
         *,
-        params: dict[str, Any] | None = None,
+        params: Any | None = None,
         json_body: Any | None = None,
         extra_headers: dict[str, str] | None = None,
     ) -> Any:

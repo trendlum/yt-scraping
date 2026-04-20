@@ -1,360 +1,327 @@
-import { useState, useEffect, useMemo } from 'react';
-import { useLocation } from 'react-router';
-import { useFilters } from '../../contexts/FilterContext';
-import { StatusChip } from '../ui/StatusChip';
-import { ScoreBar } from '../ui/ScoreBar';
+import { useEffect, useMemo, useState } from "react";
+import { useLocation } from "react-router";
+import { useFilters } from "../../contexts/FilterContext";
+import {
+  buildDashboardQuery,
+  formatPercent,
+  titleCase,
+  TopicDetailResponse,
+  TopicRow,
+} from "../../lib/dashboard";
+import { useDashboardQuery } from "../../lib/useDashboardQuery";
+import { ConfidenceBadge } from "../ui/ConfidenceBadge";
+import { ScoreBar } from "../ui/ScoreBar";
+import { Sparkline } from "../ui/Sparkline";
+import { StatusChip } from "../ui/StatusChip";
+import { Skeleton } from "../ui/skeleton";
 
-interface Topic {
-  id: string;
-  topicCluster: string;
-  topicType: string;
-  replicabilityScore: number;
-  sustainedTractionScore: number;
-  fragilityScore: number;
-  distinctChannels: number;
-  coveragePct: number;
-  concentration: string;
-  totalVideos: number;
-  avgPerformance: number;
-  topChannels: string[];
-  recentExamples: string[];
+type SortField =
+  | "topic_replicability_score"
+  | "topic_sustained_traction_score"
+  | "topic_fragility_score"
+  | "video_count"
+  | "distinct_channels_count";
+
+function scoreValue(value: number | null | undefined) {
+  return value ?? 0;
+}
+
+function scoreVariant(value: number | null | undefined): "positive" | "caution" | "critical" {
+  if (value === null || value === undefined) {
+    return "critical";
+  }
+  if (value >= 0.8) {
+    return "positive";
+  }
+  if (value >= 0.6) {
+    return "caution";
+  }
+  return "critical";
 }
 
 export function Topics() {
   const location = useLocation();
-  const { filters } = useFilters();
-  const [selectedTopic, setSelectedTopic] = useState<Topic | null>(null);
-  const [sortField, setSortField] = useState<keyof Topic>('replicabilityScore');
-  const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('desc');
-  const [currentPage, setCurrentPage] = useState(1);
-  const itemsPerPage = 5;
+  const { filters, setFilters } = useFilters();
+  const [selectedTopic, setSelectedTopic] = useState<string | null>(null);
+  const [sortField, setSortField] = useState<SortField>("topic_replicability_score");
+  const [sortDirection, setSortDirection] = useState<"asc" | "desc">("desc");
 
-  const topics: Topic[] = [
-    {
-      id: '1',
-      topicCluster: 'trump foreign policy',
-      topicType: 'replicable',
-      replicabilityScore: 0.86,
-      sustainedTractionScore: 0.78,
-      fragilityScore: 0.19,
-      distinctChannels: 8,
-      coveragePct: 72,
-      concentration: 'distributed',
-      totalVideos: 42,
-      avgPerformance: 0.81,
-      topChannels: ['@MeidasTouch', '@BrianTylerCohen', '@TheGeoNetwork'],
-      recentExamples: [
-        'Trump PANICS as Iran REJECTS ULTIMATUM',
-        'The real reason Trump changed his foreign policy',
-        'What Trump latest move means for global politics',
-      ],
-    },
-    {
-      id: '2',
-      topicCluster: 'middle east escalation',
-      topicType: 'replicable',
-      replicabilityScore: 0.82,
-      sustainedTractionScore: 0.84,
-      fragilityScore: 0.15,
-      distinctChannels: 12,
-      coveragePct: 68,
-      concentration: 'distributed',
-      totalVideos: 51,
-      avgPerformance: 0.79,
-      topChannels: ['@TheGeoNetwork', '@CaspianReport', '@RealLifeLore'],
-      recentExamples: [
-        'Why the Middle East is on the brink of war',
-        'The escalation nobody is talking about',
-        'What happens next in the Middle East crisis',
-      ],
-    },
-    {
-      id: '3',
-      topicCluster: 'political news commentary',
-      topicType: 'sustained',
-      replicabilityScore: 0.75,
-      sustainedTractionScore: 0.91,
-      fragilityScore: 0.08,
-      distinctChannels: 15,
-      coveragePct: 81,
-      concentration: 'broad',
-      totalVideos: 89,
-      avgPerformance: 0.73,
-      topChannels: ['@MeidasTouch', '@BrianTylerCohen', '@PoliticsNews'],
-      recentExamples: [
-        'Breaking: Major political shift announced',
-        'The truth behind today headlines',
-        'What the media is not telling you',
-      ],
-    },
-    {
-      id: '4',
-      topicCluster: 'bitcoin etf analysis',
-      topicType: 'replicable',
-      replicabilityScore: 0.88,
-      sustainedTractionScore: 0.76,
-      fragilityScore: 0.22,
-      distinctChannels: 9,
-      coveragePct: 65,
-      concentration: 'concentrated',
-      totalVideos: 38,
-      avgPerformance: 0.84,
-      topChannels: ['@CoinBureauFinance', '@CryptosRUs', '@AltcoinDaily'],
-      recentExamples: [
-        'Bitcoin ETF flows reveal major institutional move',
-        'Why ETF inflows are accelerating',
-        'The ETF data nobody is watching',
-      ],
-    },
-    {
-      id: '5',
-      topicCluster: 'ai agent frameworks',
-      topicType: 'emerging',
-      replicabilityScore: 0.79,
-      sustainedTractionScore: 0.68,
-      fragilityScore: 0.31,
-      distinctChannels: 7,
-      coveragePct: 58,
-      concentration: 'concentrated',
-      totalVideos: 29,
-      avgPerformance: 0.77,
-      topChannels: ['@TwoMinutePapers', '@YannicKilcher', '@AIExplained'],
-      recentExamples: [
-        'Building autonomous AI agents with LangChain',
-        'The AI agent revolution is here',
-        'How to create your own AI coding assistant',
-      ],
-    },
-  ];
-
-  const filteredTopics = useMemo(() => {
-    return topics.filter(topic => {
-      if (filters.topicCluster && !topic.topicCluster.toLowerCase().includes(filters.topicCluster.toLowerCase())) {
-        return false;
-      }
-      if (filters.topicType && topic.topicType !== filters.topicType) {
-        return false;
-      }
-      if (filters.niche) {
-        const matchesNiche = topic.topChannels.some(channel =>
-          channel.toLowerCase().includes(filters.niche.toLowerCase())
-        );
-        if (!matchesNiche) return false;
-      }
-      return true;
-    });
-  }, [topics, filters]);
-
-  const sortedTopics = [...filteredTopics].sort((a, b) => {
-    const aVal = a[sortField];
-    const bVal = b[sortField];
-    if (typeof aVal === 'number' && typeof bVal === 'number') {
-      return sortDirection === 'desc' ? bVal - aVal : aVal - bVal;
-    }
-    return 0;
-  });
-
-  const totalPages = Math.ceil(sortedTopics.length / itemsPerPage);
-  const paginatedTopics = sortedTopics.slice(
-    (currentPage - 1) * itemsPerPage,
-    currentPage * itemsPerPage
-  );
-
-  const handleSort = (field: keyof Topic) => {
-    if (sortField === field) {
-      setSortDirection(sortDirection === 'desc' ? 'asc' : 'desc');
-    } else {
-      setSortField(field);
-      setSortDirection('desc');
-    }
-  };
+  const query = useMemo(() => buildDashboardQuery(filters, { limit: 250 }), [filters]);
+  const { data, loading, error } = useDashboardQuery<{ items: TopicRow[] }>("/api/dashboard/topics", query);
+  const items = data?.items ?? [];
 
   useEffect(() => {
-    if (location.state?.selectedId) {
-      const topic = topics.find(t => t.id === location.state.selectedId);
-      if (topic) {
-        setSelectedTopic(topic);
-      }
+    const initial = (location.state as { selectedId?: string } | null | undefined)?.selectedId;
+    if (initial && items.some((row) => row.topic_cluster === initial)) {
+      setSelectedTopic(initial);
+      return;
     }
-  }, [location.state]);
+    if (!selectedTopic && items.length > 0) {
+      setSelectedTopic(items[0].topic_cluster);
+    }
+  }, [items, location.state, selectedTopic]);
+
+  useEffect(() => {
+    if (selectedTopic && !items.some((row) => row.topic_cluster === selectedTopic)) {
+      setSelectedTopic(items[0]?.topic_cluster ?? null);
+    }
+  }, [items, selectedTopic]);
+
+  const selectedRow = useMemo(
+    () => items.find((row) => row.topic_cluster === selectedTopic) ?? null,
+    [items, selectedTopic],
+  );
+
+  const detailQuery = useMemo(
+    () => buildDashboardQuery(filters, { topic_cluster: selectedRow?.topic_cluster ?? selectedTopic ?? "" }),
+    [filters, selectedRow?.topic_cluster, selectedTopic],
+  );
+  const { data: detailData, loading: detailLoading } = useDashboardQuery<TopicDetailResponse>(
+    "/api/dashboard/topic-detail",
+    detailQuery,
+  );
+
+  const sortedItems = useMemo(() => {
+    return [...items].sort((left, right) => {
+      const leftValue = scoreValue(left[sortField]);
+      const rightValue = scoreValue(right[sortField]);
+      return sortDirection === "desc" ? rightValue - leftValue : leftValue - rightValue;
+    });
+  }, [items, sortDirection, sortField]);
+
+  const onSort = (field: SortField) => {
+    if (field === sortField) {
+      setSortDirection((current) => (current === "desc" ? "asc" : "desc"));
+      return;
+    }
+    setSortField(field);
+    setSortDirection("desc");
+  };
+
+  const handleSelect = (row: TopicRow) => {
+    setSelectedTopic(row.topic_cluster);
+    setFilters({
+      ...filters,
+      topicCluster: row.topic_cluster,
+      topicType: row.topic_type || filters.topicType,
+    });
+  };
 
   return (
-    <div className="h-[calc(100vh-180px)] overflow-auto px-4 pt-4 pb-0">
-      <div className={selectedTopic ? '' : 'pb-4'}>
-        <div className="mb-3 flex items-center justify-between">
-          <div className="flex items-center gap-4">
-            <h2 className="text-sm text-foreground font-medium">Topic Rankings</h2>
+    <div className="h-[calc(100vh-180px)] overflow-auto px-4 pt-4 pb-6">
+      <div className="grid gap-4 xl:grid-cols-[minmax(0,1.45fr)_minmax(0,0.9fr)]">
+        <section className="rounded-xl border border-border bg-card">
+          <div className="flex items-center justify-between border-b border-border px-4 py-3">
+            <div>
+              <h2 className="text-sm text-foreground">Topic rankings</h2>
+              <p className="text-xs text-muted-foreground">Ranked by replicability, sustained traction, and fragility.</p>
+            </div>
             <div className="flex items-center gap-2 text-xs">
               <button
-                onClick={() => setCurrentPage(Math.max(1, currentPage - 1))}
-                disabled={currentPage === 1}
-                className="px-2 py-1 text-muted-foreground hover:text-primary disabled:opacity-30 disabled:cursor-not-allowed"
+                type="button"
+                onClick={() => onSort("topic_replicability_score")}
+                className={sortField === "topic_replicability_score" ? "text-primary" : "text-muted-foreground"}
               >
-                ←
+                Replicability
               </button>
-              <span className="text-muted-foreground">
-                {currentPage} / {totalPages}
-              </span>
               <button
-                onClick={() => setCurrentPage(Math.min(totalPages, currentPage + 1))}
-                disabled={currentPage === totalPages}
-                className="px-2 py-1 text-muted-foreground hover:text-primary disabled:opacity-30 disabled:cursor-not-allowed"
+                type="button"
+                onClick={() => onSort("topic_sustained_traction_score")}
+                className={sortField === "topic_sustained_traction_score" ? "text-primary" : "text-muted-foreground"}
               >
-                →
+                Traction
               </button>
             </div>
           </div>
-        </div>
 
-        <div className="bg-card border border-border rounded-lg overflow-hidden">
-          <table className="w-full">
-            <thead className="bg-muted border-b border-border">
-              <tr className="text-[10px] text-muted-foreground uppercase tracking-wide">
-                <th className="text-left px-3 py-2">Topic Cluster</th>
-                <th className="text-left px-3 py-2">Type</th>
-                <th className="text-left px-3 py-2 cursor-pointer hover:text-primary" onClick={() => handleSort('replicabilityScore')}>
-                  Replicability {sortField === 'replicabilityScore' && (sortDirection === 'desc' ? '↓' : '↑')}
-                </th>
-                <th className="text-left px-3 py-2 cursor-pointer hover:text-primary" onClick={() => handleSort('sustainedTractionScore')}>
-                  Traction {sortField === 'sustainedTractionScore' && (sortDirection === 'desc' ? '↓' : '↑')}
-                </th>
-                <th className="text-left px-3 py-2 cursor-pointer hover:text-primary" onClick={() => handleSort('fragilityScore')}>
-                  Fragility {sortField === 'fragilityScore' && (sortDirection === 'desc' ? '↓' : '↑')}
-                </th>
-                <th className="text-left px-3 py-2">Coverage</th>
-                <th className="text-left px-3 py-2">Channels</th>
-              </tr>
-            </thead>
-            <tbody>
-              {paginatedTopics.map((topic) => (
-                <tr
-                  key={topic.id}
-                  className={`border-b border-border hover:bg-muted/50 cursor-pointer transition ${selectedTopic?.id === topic.id ? 'bg-primary/5' : ''}`}
-                  onClick={() => setSelectedTopic(topic)}
-                >
-                  <td className="px-3 py-2.5 text-sm text-foreground">{topic.topicCluster}</td>
-                  <td className="px-3 py-2.5">
-                    <StatusChip status={topic.topicType} variant="positive" />
-                  </td>
-                  <td className="px-3 py-2.5">
-                    <div className="w-24">
-                      <ScoreBar score={topic.replicabilityScore} variant="positive" />
-                    </div>
-                  </td>
-                  <td className="px-3 py-2.5">
-                    <div className="w-24">
-                      <ScoreBar score={topic.sustainedTractionScore} variant="positive" />
-                    </div>
-                  </td>
-                  <td className="px-3 py-2.5">
-                    <div className="w-24">
-                      <ScoreBar score={topic.fragilityScore} variant="caution" />
-                    </div>
-                  </td>
-                  <td className="px-3 py-2.5 text-xs text-muted-foreground">{topic.coveragePct}%</td>
-                  <td className="px-3 py-2.5 text-xs text-muted-foreground">{topic.distinctChannels}</td>
-                </tr>
+          {loading ? (
+            <div className="space-y-3 p-4">
+              {Array.from({ length: 5 }).map((_, index) => (
+                <Skeleton key={index} className="h-16 w-full" />
               ))}
-            </tbody>
-          </table>
-        </div>
-
-        {selectedTopic && (
-          <div className="mt-4 bg-card border border-border rounded-lg p-4">
-            <div className="flex items-start justify-between mb-4">
-              <div>
-                <h3 className="mb-2 text-sm text-foreground">{selectedTopic.topicCluster}</h3>
-                <StatusChip status={selectedTopic.topicType} variant="positive" />
-              </div>
-              <button
-                onClick={() => setSelectedTopic(null)}
-                className="text-muted-foreground hover:text-primary text-sm"
-              >
-                ✕
-              </button>
             </div>
-
-            <div className="grid grid-cols-4 gap-6">
-              <div>
-                <h4 className="text-xs text-muted-foreground mb-2 uppercase tracking-wide">Opportunity Metrics</h4>
-                <div className="space-y-3">
-                  <div>
-                    <div className="text-xs text-muted-foreground mb-1">Replicability score</div>
-                    <ScoreBar score={selectedTopic.replicabilityScore} variant="positive" />
-                  </div>
-                  <div>
-                    <div className="text-xs text-muted-foreground mb-1">Sustained traction score</div>
-                    <ScoreBar score={selectedTopic.sustainedTractionScore} variant="positive" />
-                  </div>
-                  <div>
-                    <div className="text-xs text-muted-foreground mb-1">Fragility score</div>
-                    <ScoreBar score={selectedTopic.fragilityScore} variant="caution" />
-                  </div>
-                  <div>
-                    <div className="text-xs text-muted-foreground mb-1">Average performance</div>
-                    <ScoreBar score={selectedTopic.avgPerformance} variant="positive" />
-                  </div>
-                </div>
-              </div>
-
-              <div>
-                <h4 className="text-xs text-muted-foreground mb-2 uppercase tracking-wide">Distribution Analysis</h4>
-                <div className="grid grid-cols-2 gap-4 text-sm">
-                  <div>
-                    <div className="text-muted-foreground mb-1">Coverage</div>
-                    <div>{selectedTopic.coveragePct}%</div>
-                  </div>
-                  <div>
-                    <div className="text-muted-foreground mb-1">Concentration</div>
-                    <div>{selectedTopic.concentration}</div>
-                  </div>
-                  <div>
-                    <div className="text-muted-foreground mb-1">Distinct channels</div>
-                    <div>{selectedTopic.distinctChannels}</div>
-                  </div>
-                  <div>
-                    <div className="text-muted-foreground mb-1">Total videos</div>
-                    <div>{selectedTopic.totalVideos}</div>
-                  </div>
-                </div>
-              </div>
-
-              <div>
-                <h4 className="text-xs text-muted-foreground mb-2 uppercase tracking-wide">Top Channels</h4>
-                <div className="space-y-2">
-                  {selectedTopic.topChannels.map((channel) => (
-                    <div key={channel} className="text-sm bg-muted/30 rounded px-3 py-2">
-                      {channel}
-                    </div>
+          ) : error ? (
+            <div className="p-4 text-sm text-critical">{error}</div>
+          ) : sortedItems.length === 0 ? (
+            <div className="p-4 text-sm text-muted-foreground">No topics match the current filters.</div>
+          ) : (
+            <div className="overflow-hidden">
+              <table className="w-full">
+                <thead className="border-b border-border bg-muted/40 text-[10px] uppercase tracking-wide text-muted-foreground">
+                  <tr>
+                    <th className="px-4 py-2 text-left">Topic</th>
+                    <th className="px-4 py-2 text-left">Type</th>
+                    <th className="px-4 py-2 text-left">Replicability</th>
+                    <th className="px-4 py-2 text-left">Traction</th>
+                    <th className="px-4 py-2 text-left">Fragility</th>
+                    <th className="px-4 py-2 text-left">Coverage</th>
+                    <th className="px-4 py-2 text-left">Channels</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {sortedItems.map((row) => (
+                    <tr
+                      key={row.topic_cluster}
+                      onClick={() => handleSelect(row)}
+                      className={`cursor-pointer border-b border-border transition hover:bg-muted/30 ${
+                        selectedTopic === row.topic_cluster ? "bg-primary/5" : ""
+                      }`}
+                    >
+                      <td className="px-4 py-3">
+                        <div className="text-sm text-foreground">{row.topic_cluster}</div>
+                        <div className="mt-1 text-[10px] uppercase tracking-wide text-muted-foreground">
+                          {titleCase(filters.analysisWindow ? `${filters.analysisWindow} day window` : "Latest")}
+                        </div>
+                      </td>
+                      <td className="px-4 py-3">
+                        <StatusChip status={row.topic_type} variant={scoreVariant(row.topic_replicability_score)} />
+                      </td>
+                      <td className="px-4 py-3">
+                        <div className="w-28">
+                          <ScoreBar score={scoreValue(row.topic_replicability_score)} variant="positive" />
+                        </div>
+                      </td>
+                      <td className="px-4 py-3">
+                        <div className="w-28">
+                          <ScoreBar score={scoreValue(row.topic_sustained_traction_score)} variant="positive" />
+                        </div>
+                      </td>
+                      <td className="px-4 py-3">
+                        <div className="w-28">
+                          <ScoreBar score={scoreValue(row.topic_fragility_score)} variant="caution" />
+                        </div>
+                      </td>
+                      <td className="px-4 py-3 text-sm text-muted-foreground">
+                        {formatPercent(row.pct_videos_with_topic)}
+                      </td>
+                      <td className="px-4 py-3 text-sm text-muted-foreground">{row.distinct_channels_count}</td>
+                    </tr>
                   ))}
-                </div>
-              </div>
-
-              <div>
-                <h4 className="text-xs text-muted-foreground mb-2 uppercase tracking-wide">Recent Examples</h4>
-                <div className="space-y-2">
-                  {selectedTopic.recentExamples.map((example, idx) => (
-                    <div key={idx} className="text-sm bg-muted/30 rounded px-3 py-2">
-                      {example}
-                    </div>
-                  ))}
-                </div>
-              </div>
+                </tbody>
+              </table>
             </div>
+          )}
+        </section>
 
-            {selectedTopic.fragilityScore > 0.25 && (
-              <div className="mt-4 p-3 bg-caution/10 border border-caution/30 rounded text-xs text-caution-foreground">
-                ⚠️ High fragility detected. This topic may be time-sensitive or event-driven.
-              </div>
-            )}
-
-            {selectedTopic.replicabilityScore > 0.8 && selectedTopic.sustainedTractionScore > 0.75 && (
-              <div className="mt-4 p-3 bg-positive/10 border border-positive/30 rounded text-xs text-positive-foreground">
-                ✓ Strong replication opportunity. High scores in both replicability and sustained traction.
-              </div>
-            )}
+        <aside className="rounded-xl border border-border bg-card p-4">
+          <div className="mb-4">
+            <h3 className="text-sm text-foreground">Topic detail</h3>
+            <p className="text-xs text-muted-foreground">Replicability, traction, fragility, and channel dispersion.</p>
           </div>
-        )}
+
+          {!selectedRow ? (
+            <div className="rounded-lg border border-dashed border-border p-4 text-sm text-muted-foreground">
+              Select a topic cluster to inspect the supporting channels and example videos.
+            </div>
+          ) : detailLoading ? (
+            <div className="space-y-3">
+              <Skeleton className="h-24 w-full" />
+              <Skeleton className="h-20 w-full" />
+              <Skeleton className="h-20 w-full" />
+            </div>
+          ) : (
+            <div className="space-y-4">
+              <div className="rounded-lg border border-border bg-background/40 p-3">
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <div className="text-base text-foreground">{selectedRow.topic_cluster}</div>
+                    <div className="mt-2 flex flex-wrap items-center gap-2">
+                      <StatusChip status={selectedRow.topic_type} variant={scoreVariant(selectedRow.topic_replicability_score)} />
+                      <ConfidenceBadge confidence={selectedRow.sample_confidence_level} />
+                    </div>
+                  </div>
+                  <Sparkline
+                    data={[
+                      selectedRow.topic_start_strength_score ?? 0,
+                      selectedRow.topic_sustained_traction_score ?? 0,
+                      selectedRow.topic_replicability_score ?? 0,
+                    ]}
+                  />
+                </div>
+
+                <div className="mt-4 grid gap-3 sm:grid-cols-2">
+                  <div>
+                    <div className="mb-1 text-xs text-muted-foreground">Replicability</div>
+                    <ScoreBar score={selectedRow.topic_replicability_score ?? 0} variant="positive" />
+                  </div>
+                  <div>
+                    <div className="mb-1 text-xs text-muted-foreground">Sustained traction</div>
+                    <ScoreBar score={selectedRow.topic_sustained_traction_score ?? 0} variant="positive" />
+                  </div>
+                  <div>
+                    <div className="mb-1 text-xs text-muted-foreground">Start strength</div>
+                    <ScoreBar score={selectedRow.topic_start_strength_score ?? 0} variant="positive" />
+                  </div>
+                  <div>
+                    <div className="mb-1 text-xs text-muted-foreground">Fragility</div>
+                    <ScoreBar score={selectedRow.topic_fragility_score ?? 0} variant="caution" />
+                  </div>
+                </div>
+              </div>
+
+              <div className="grid gap-3 sm:grid-cols-2">
+                <div className="rounded-lg border border-border bg-background/40 p-3">
+                  <div className="text-[10px] uppercase tracking-wide text-muted-foreground">Videos</div>
+                  <div className="mt-1 text-lg text-foreground">{selectedRow.video_count}</div>
+                </div>
+                <div className="rounded-lg border border-border bg-background/40 p-3">
+                  <div className="text-[10px] uppercase tracking-wide text-muted-foreground">Channels</div>
+                  <div className="mt-1 text-lg text-foreground">{selectedRow.distinct_channels_count}</div>
+                </div>
+              </div>
+
+              <div className="rounded-lg border border-border bg-background/40 p-3 text-sm text-muted-foreground">
+                Coverage {formatPercent(selectedRow.pct_videos_with_topic)} and {selectedRow.distinct_channels_count} distinct channels.
+              </div>
+
+              {selectedRow.topic_fragility_score !== null && selectedRow.topic_fragility_score > 0.25 ? (
+                <div className="rounded-lg border border-caution/30 bg-caution/10 p-3 text-xs text-caution-foreground">
+                  High fragility detected. This topic may be time-sensitive or event-driven.
+                </div>
+              ) : null}
+
+              {selectedRow.topic_replicability_score !== null && selectedRow.topic_replicability_score > 0.8 ? (
+                <div className="rounded-lg border border-positive/30 bg-positive/10 p-3 text-xs text-positive-foreground">
+                  Strong replication opportunity. High replicability with sustained traction.
+                </div>
+              ) : null}
+
+              <div className="rounded-lg border border-border bg-background/40 p-3">
+                <div className="mb-2 text-xs uppercase tracking-wide text-muted-foreground">Top channels</div>
+                <div className="space-y-2">
+                  {(detailData?.top_channels ?? []).length === 0 ? (
+                    <div className="text-sm text-muted-foreground">No channel dispersion data available for this topic.</div>
+                  ) : (
+                    (detailData?.top_channels ?? []).map((item) => (
+                      <div key={item.channel_handle} className="flex items-center justify-between rounded-md border border-border px-3 py-2">
+                        <span className="text-sm text-foreground">{item.channel_handle}</span>
+                        <span className="text-xs text-muted-foreground">{item.count}</span>
+                      </div>
+                    ))
+                  )}
+                </div>
+              </div>
+
+              <div className="rounded-lg border border-border bg-background/40 p-3">
+                <div className="mb-2 text-xs uppercase tracking-wide text-muted-foreground">Recent examples</div>
+                <div className="space-y-2">
+                  {(detailData?.recent_examples ?? []).length === 0 ? (
+                    <div className="text-sm text-muted-foreground">No example videos resolved for this topic cluster.</div>
+                  ) : (
+                    (detailData?.recent_examples ?? []).map((video) => (
+                      <div key={video.video_id} className="rounded-md border border-border px-3 py-2">
+                        <div className="text-sm text-foreground">{video.title}</div>
+                        <div className="mt-1 text-[10px] uppercase tracking-wide text-muted-foreground">
+                          {video.channel_handle} · {video.channel_niche || "Uncategorized"}
+                        </div>
+                      </div>
+                    ))
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
+        </aside>
       </div>
     </div>
   );
