@@ -31,5 +31,8 @@ yt-topic-cluster-backfill = "yt_insights.tools.topic_cluster_backfill:main"
 [tool.setuptools.packages.find]
 where = ["src"]
 
+[tool.setuptools.package-data]
+"yt_insights.bots" = ["topic_cluster.txt"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]

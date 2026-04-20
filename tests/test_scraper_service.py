@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from pathlib import Path
 
 from yt_insights.analytics.thumbnail_features import ThumbnailImageFeatures
 from yt_insights.models import VideoMetricSnapshot, VideoRecord
@@ -148,6 +149,26 @@ class CountingThumbnailExtractor:
 
 def test_merge_unique_video_ids_preserves_order() -> None:
     assert merge_unique_video_ids(["a", "b"], ["b", "c"]) == ["a", "b", "c"]
+
+
+def test_load_topic_cluster_prompt_uses_packaged_resource_when_repo_path_is_missing(monkeypatch, tmp_path) -> None:
+    from yt_insights.services import topic_clustering
+
+    monkeypatch.setattr(topic_clustering, "BOT_PROMPT_PATH", tmp_path / "missing-topic_cluster.txt")
+
+    prompt = topic_clustering.load_topic_cluster_prompt()
+
+    assert prompt.description == "Extract topic clusters, format_type and promise_type from a YouTube video"
+    assert prompt.model == "deepseek"
+    assert "Return ONLY valid JSON" in prompt.system_prompt
+    assert prompt.user_template == "Channel niche: {{channel_niche}}\nTitle: {{title}}\nThumbnail text: {{thumbnail_text}}"
+
+
+def test_packaged_topic_cluster_prompt_matches_repo_prompt() -> None:
+    repo_prompt = (Path("bots") / "topic_cluster.txt").read_text(encoding="utf-8")
+    packaged_prompt = (Path("src") / "yt_insights" / "bots" / "topic_cluster.txt").read_text(encoding="utf-8")
+
+    assert packaged_prompt == repo_prompt
 
 
 def test_run_batch_scrape_persists_current_rows_snapshots_and_features() -> None:

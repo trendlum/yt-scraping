@@ -3,6 +3,7 @@ from __future__ import annotations
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from datetime import datetime
+from importlib import resources
 import json
 import logging
 import os
@@ -19,7 +20,9 @@ from ..models import serialize_datetime, sha1_text, utc_now
 
 
 LOGGER = logging.getLogger(__name__)
-BOT_PROMPT_PATH = Path(__file__).resolve().parents[3] / "bots" / "topic_cluster.txt"
+BOT_PROMPT_PACKAGE = "yt_insights.bots"
+BOT_PROMPT_RESOURCE = "topic_cluster.txt"
+BOT_PROMPT_PATH = Path(__file__).resolve().parents[3] / "bots" / BOT_PROMPT_RESOURCE
 ALLOWED_FORMAT_TYPES = {
     "data_analysis",
     "news_breakdown",
@@ -128,8 +131,28 @@ def _extract_json_from_text(text: str) -> dict[str, Any]:
     return parsed
 
 
-def load_topic_cluster_prompt(prompt_path: Path = BOT_PROMPT_PATH) -> TopicClusterPrompt:
-    raw_text = prompt_path.read_text(encoding="utf-8")
+def _read_topic_cluster_prompt_text(prompt_path: Path | None = None) -> tuple[str, str]:
+    if prompt_path is not None:
+        return prompt_path.read_text(encoding="utf-8"), str(prompt_path)
+
+    if BOT_PROMPT_PATH.exists():
+        return BOT_PROMPT_PATH.read_text(encoding="utf-8"), str(BOT_PROMPT_PATH)
+
+    try:
+        resource = resources.files(BOT_PROMPT_PACKAGE).joinpath(BOT_PROMPT_RESOURCE)
+        if resource.is_file():
+            return resource.read_text(encoding="utf-8"), f"{BOT_PROMPT_PACKAGE}:{BOT_PROMPT_RESOURCE}"
+    except (AttributeError, FileNotFoundError, ModuleNotFoundError, TypeError):
+        pass
+
+    raise FileNotFoundError(
+        f"No se pudo localizar el prompt de topic clustering en {BOT_PROMPT_PACKAGE}:{BOT_PROMPT_RESOURCE} "
+        f"ni en {BOT_PROMPT_PATH}"
+    )
+
+
+def load_topic_cluster_prompt(prompt_path: Path | None = None) -> TopicClusterPrompt:
+    raw_text, _ = _read_topic_cluster_prompt_text(prompt_path)
     payload = yaml.safe_load(raw_text)
     prompt_payload = payload["prompt"]
     system_prompt = str(prompt_payload["system"]).strip()
