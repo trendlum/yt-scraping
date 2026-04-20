@@ -42,6 +42,8 @@ jobs:
     runs-on: ubuntu-latest
     env:
       YT_API_KEY: ${{ secrets.YT_API_KEY }}
+      DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
       SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
       SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
       SCRAPER_LIMIT: ${{ inputs.limit }}
@@ -102,6 +104,28 @@ jobs:
             CMD+=(--limit "$LIMIT")
           fi
           "${CMD[@]}"
+
+      - name: Refresh analytical tables
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          refresh_rpc() {
+            local fn="$1"
+            echo "Refreshing ${fn}"
+            curl --fail-with-body -sS -X POST \
+              "${SUPABASE_URL}/rest/v1/rpc/${fn}" \
+              -H "apikey: ${SUPABASE_SERVICE_ROLE_KEY}" \
+              -H "Authorization: Bearer ${SUPABASE_SERVICE_ROLE_KEY}" \
+              -H "Content-Type: application/json" \
+              -d '{}' >/dev/null
+          }
+
+          refresh_rpc refresh_all_yt_niche_growth_analysis
+          refresh_rpc refresh_all_yt_channel_growth_analysis
+          refresh_rpc refresh_all_yt_underpackaged_video_analysis
+          refresh_rpc refresh_all_yt_overpackaged_video_analysis
+          refresh_rpc refresh_all_yt_topic_performance_analysis
 
       - name: Upload latest run artifact
         if: always()

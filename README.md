@@ -110,10 +110,12 @@ El workflow [`.github/workflows/youtube-scraper.yml`](.github/workflows/youtube-
 - ejecutarse automaticamente cada 6 horas
 - subir `latest_run.json` como artefacto de cada ejecucion
 - poblar `yt_videos`, `yt_video_metric_snapshots`, `yt_video_features`, `yt_video_performance` y actualizar `yt_scraper_state`
+- refrescar las tablas analiticas `yt_niche_growth_analysis`, `yt_channel_growth_analysis`, `yt_underpackaged_video_analysis`, `yt_overpackaged_video_analysis` y `yt_topic_performance_analysis`
 
 Secrets obligatorios del repositorio:
 
 - `YT_API_KEY`
+- `DEEPSEEK_API_KEY` o `OPENAI_API_KEY` si quieres que se ejecute la fase de `topic_cluster`
 - `SUPABASE_URL`
 - `SUPABASE_SERVICE_ROLE_KEY`
 
