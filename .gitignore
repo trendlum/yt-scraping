@@ -9,4 +9,4 @@ yt_insights.egg-info
 sql/
 .venv
 public/dashboard/node_modules/
-node_modules/
+public/dashboard/temp-dist/

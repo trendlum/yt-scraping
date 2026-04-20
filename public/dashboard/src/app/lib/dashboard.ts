@@ -2,7 +2,6 @@ export type ConfidenceLevel = "high" | "medium" | "low";
 
 export interface DashboardFiltersState {
   analysisWindow: string;
-  analysisDate: string;
   niche: string;
   channelHandle: string;
   topicCluster: string;
@@ -193,7 +192,9 @@ export interface OverviewResponse {
     topics_count: number;
     underpackaged_count: number;
     overpackaged_count: number;
+    tracked_rows_count: number;
     high_confidence_count: number;
+    high_confidence_share: number;
   };
   niches: NicheRow[];
   channels: ChannelRow[];
@@ -225,16 +226,18 @@ export interface VideoDetailResponse {
 }
 
 export interface MetaResponse {
-  latest_analysis_date: string | null;
   default_window_days: number;
   available_window_days: number[];
+  niche_growth_status_options: string[];
+  channel_growth_status_options: string[];
+  topic_type_options: string[];
+  performance_label_options: string[];
 }
 
 type QueryValue = string | number | boolean | null | undefined;
 
 const filterParamMap: Record<keyof DashboardFiltersState, string> = {
   analysisWindow: "analysis_window",
-  analysisDate: "analysis_date",
   niche: "niche",
   channelHandle: "channel_handle",
   topicCluster: "topic_cluster",

@@ -35,7 +35,6 @@ def _parse_filters(query: dict[str, list[str]]) -> DashboardFilters:
     threshold_value = first("min_sample_threshold")
     return DashboardFilters(
         analysis_window=int(window_value) if window_value else None,
-        analysis_date=first("analysis_date"),
         niche=first("niche"),
         channel_handle=first("channel_handle"),
         topic_cluster=first("topic_cluster"),

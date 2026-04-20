@@ -3,7 +3,6 @@ import { useNavigate } from "react-router";
 import { useFilters } from "../../contexts/FilterContext";
 import {
   buildDashboardQuery,
-  ConfidenceLevel,
   OverviewResponse,
   formatAgeDays,
   formatPercent,
@@ -15,16 +14,7 @@ import { KPICard } from "../ui/KPICard";
 import { ScoreBar } from "../ui/ScoreBar";
 import { Sparkline } from "../ui/Sparkline";
 import { StatusChip } from "../ui/StatusChip";
-import { Skeleton } from "../ui/skeleton";
-
-function confidenceCount(items: Array<{ sample_confidence_level?: ConfidenceLevel; underpackaged_confidence?: ConfidenceLevel; overpackaged_confidence?: ConfidenceLevel }>) {
-  return items.filter(
-    (item) =>
-      item.sample_confidence_level === "high" ||
-      item.underpackaged_confidence === "high" ||
-      item.overpackaged_confidence === "high",
-  ).length;
-}
+import { Spinner } from "../ui/spinner";
 
 function scoreVariant(value: number | null | undefined): "positive" | "caution" | "critical" {
   if (value === null || value === undefined) {
@@ -47,16 +37,9 @@ export function Overview() {
   const { data, loading, error } = useDashboardQuery<OverviewResponse>("/api/dashboard/overview", query);
 
   const summary = data?.summary;
-  const confidenceRows = [
-    ...((data?.niches ?? []) as Array<{ sample_confidence_level?: ConfidenceLevel }>),
-    ...((data?.channels ?? []) as Array<{ sample_confidence_level?: ConfidenceLevel }>),
-    ...((data?.topics ?? []) as Array<{ sample_confidence_level?: ConfidenceLevel }>),
-    ...((data?.underpackaged ?? []) as Array<{ underpackaged_confidence?: ConfidenceLevel }>),
-    ...((data?.overpackaged ?? []) as Array<{ overpackaged_confidence?: ConfidenceLevel }>),
-  ];
-  const highConfidenceCount = confidenceCount(confidenceRows);
-  const totalTracked = confidenceRows.length;
-  const highConfidenceShare = totalTracked > 0 ? Math.round((highConfidenceCount / totalTracked) * 100) : 0;
+  const highConfidenceCount = summary?.high_confidence_count ?? 0;
+  const totalTracked = summary?.tracked_rows_count ?? 0;
+  const highConfidenceShare = summary?.high_confidence_share ?? 0;
 
   const applyFilterAndNavigate = (path: string, nextFilters: Partial<typeof filters>) => {
     setFilters({ ...filters, ...nextFilters });
@@ -90,11 +73,7 @@ export function Overview() {
             <StatusChip status={`window ${filters.analysisWindow}d`} variant="neutral" />
           </div>
 
-          <div className="grid gap-3 sm:grid-cols-4">
-            <div className="rounded-lg border border-border bg-background/40 p-3">
-              <div className="text-[10px] uppercase tracking-wide text-muted-foreground">Analysis date</div>
-              <div className="mt-1 text-lg text-foreground">{filters.analysisDate || "Latest"}</div>
-            </div>
+          <div className="grid gap-3 sm:grid-cols-3">
             <div className="rounded-lg border border-border bg-background/40 p-3">
               <div className="text-[10px] uppercase tracking-wide text-muted-foreground">Window</div>
               <div className="mt-1 text-lg text-foreground">{filters.analysisWindow} days</div>
@@ -126,13 +105,10 @@ export function Overview() {
       </div>
 
       {loading ? (
-        <div className="grid gap-4 xl:grid-cols-2">
-          {Array.from({ length: 4 }).map((_, index) => (
-            <div key={index} className="rounded-xl border border-border bg-card p-4">
-              <Skeleton className="h-4 w-40" />
-              <Skeleton className="mt-4 h-28 w-full" />
-            </div>
-          ))}
+        <div className="rounded-xl border border-border bg-card p-10">
+          <div className="flex min-h-[22rem] items-center justify-center">
+            <Spinner />
+          </div>
         </div>
       ) : error ? (
         <div className="rounded-xl border border-critical/30 bg-critical/10 p-4 text-sm text-critical">

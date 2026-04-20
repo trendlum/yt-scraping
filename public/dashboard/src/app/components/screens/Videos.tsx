@@ -16,7 +16,7 @@ import { ConfidenceBadge } from "../ui/ConfidenceBadge";
 import { ScoreBar } from "../ui/ScoreBar";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "../ui/sheet";
 import { StatusChip } from "../ui/StatusChip";
-import { Skeleton } from "../ui/skeleton";
+import { Spinner } from "../ui/spinner";
 import { Tabs, TabsList, TabsTrigger } from "../ui/tabs";
 
 type SortField = "primary_score" | "momentum_score" | "age_days" | "ratio_d7";
@@ -183,10 +183,8 @@ export function Videos() {
           </div>
 
           {loading ? (
-            <div className="space-y-3 p-4">
-              {Array.from({ length: 5 }).map((_, index) => (
-                <Skeleton key={index} className="h-16 w-full" />
-              ))}
+            <div className="flex min-h-[18rem] items-center justify-center p-4">
+              <Spinner />
             </div>
           ) : error ? (
             <div className="p-4 text-sm text-critical">{error}</div>
@@ -262,10 +260,8 @@ export function Videos() {
           {!selectedRow ? (
             <div className="px-4 pb-4 text-sm text-muted-foreground">Select a video to inspect its full detail panel.</div>
           ) : detailLoading ? (
-            <div className="space-y-3 px-4 pb-4">
-              <Skeleton className="h-24 w-full" />
-              <Skeleton className="h-24 w-full" />
-              <Skeleton className="h-24 w-full" />
+            <div className="flex min-h-[16rem] items-center justify-center px-4 pb-4">
+              <Spinner />
             </div>
           ) : (
             <div className="space-y-4 px-4 pb-6">

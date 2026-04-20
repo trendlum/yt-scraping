@@ -23,7 +23,6 @@ def _contains(value: str, needle: str) -> bool:
 @dataclass(frozen=True)
 class DashboardFilters:
     analysis_window: int | None = None
-    analysis_date: str | None = None
     niche: str | None = None
     channel_handle: str | None = None
     topic_cluster: str | None = None
@@ -40,6 +39,21 @@ class DashboardRepository:
     def __init__(self, client: SupabaseClient) -> None:
         self.client = client
 
+    @staticmethod
+    def _distinct_strings(rows: list[dict[str, Any]], key: str) -> list[str]:
+        seen: set[str] = set()
+        values: list[str] = []
+        for row in rows:
+            value = row.get(key)
+            if not value:
+                continue
+            text = str(value)
+            if text in seen:
+                continue
+            seen.add(text)
+            values.append(text)
+        return values
+
     def _query(
         self,
         table: str,
@@ -50,14 +64,11 @@ class DashboardRepository:
         order: str | None = None,
         limit: int | None = None,
         include_window_days: bool = True,
-        include_analysis_date: bool = True,
     ) -> list[dict[str, Any]]:
         params: list[tuple[str, Any]] = [("select", select)]
         if filters is not None:
             if include_window_days and filters.analysis_window is not None:
                 params.append(("window_days", f"eq.{filters.analysis_window}"))
-            if include_analysis_date and filters.analysis_date:
-                params.append(("analysis_date", f"eq.{filters.analysis_date}"))
 
         if extra_params:
             params.extend(extra_params)
@@ -103,29 +114,54 @@ class DashboardRepository:
         return [{"channel_handle": channel, "count": count} for channel, count in counter.most_common(limit)]
 
     def get_meta(self) -> dict[str, Any]:
-        summary = self._query(
-            "vw_dashboard_overview_summary",
-            select=(
-                "niches_analysis_date,channels_analysis_date,topics_analysis_date,"
-                "underpackaged_analysis_date,overpackaged_analysis_date"
-            ),
-            limit=1,
+        niche_status_rows = self._query(
+            "vw_niche_rankings",
+            select="niche_growth_status_early,niche_growth_status_confirmed",
+            limit=500,
             include_window_days=False,
-            include_analysis_date=False,
         )
-        row = summary[0] if summary else {}
-        dates = [
-            row.get("niches_analysis_date"),
-            row.get("channels_analysis_date"),
-            row.get("topics_analysis_date"),
-            row.get("underpackaged_analysis_date"),
-            row.get("overpackaged_analysis_date"),
-        ]
-        latest = next((date for date in dates if date), None)
+        niche_status_options = self._distinct_strings(niche_status_rows, "niche_growth_status_early")
+        niche_status_options.extend(
+            value
+            for value in self._distinct_strings(niche_status_rows, "niche_growth_status_confirmed")
+            if value not in niche_status_options
+        )
+
+        channel_status_options = self._distinct_strings(
+            self._query(
+                "vw_channel_rankings",
+                select="channel_growth_status",
+                limit=500,
+                include_window_days=False,
+            ),
+            "channel_growth_status",
+        )
+        topic_type_options = self._distinct_strings(
+            self._query(
+                "vw_topic_rankings",
+                select="topic_type",
+                limit=500,
+                include_window_days=False,
+            ),
+            "topic_type",
+        )
+        performance_label_options = self._distinct_strings(
+            self._query(
+                "vw_video_detail",
+                select="performance_label",
+                limit=1000,
+                include_window_days=False,
+            ),
+            "performance_label",
+        )
+
         return {
-            "latest_analysis_date": latest,
             "default_window_days": 30,
             "available_window_days": [30, 60, 90],
+            "niche_growth_status_options": niche_status_options,
+            "channel_growth_status_options": channel_status_options,
+            "topic_type_options": topic_type_options,
+            "performance_label_options": performance_label_options,
         }
 
     def list_niches(self, filters: DashboardFilters) -> list[dict[str, Any]]:
@@ -170,7 +206,6 @@ class DashboardRepository:
             "vw_niche_detail",
             filters=DashboardFilters(
                 analysis_window=filters.analysis_window,
-                analysis_date=filters.analysis_date,
                 niche=niche,
             ),
             extra_params=[("niche", f"eq.{niche}")],
@@ -183,7 +218,6 @@ class DashboardRepository:
             "vw_channel_rankings",
             filters=DashboardFilters(
                 analysis_window=filters.analysis_window,
-                analysis_date=filters.analysis_date,
                 niche=niche,
             ),
             extra_params=[("channel_niche", f"eq.{niche}")],
@@ -204,7 +238,6 @@ class DashboardRepository:
             order="overall_score.desc.nullslast",
             limit=200,
             include_window_days=False,
-            include_analysis_date=False,
         )
         return {
             "row": rows[0],
@@ -252,7 +285,6 @@ class DashboardRepository:
             "vw_channel_detail",
             filters=DashboardFilters(
                 analysis_window=filters.analysis_window,
-                analysis_date=filters.analysis_date,
                 channel_handle=channel_handle,
             ),
             extra_params=[("channel_handle", f"eq.{channel_handle}")],
@@ -268,7 +300,6 @@ class DashboardRepository:
             order="overall_score.desc.nullslast",
             limit=50,
             include_window_days=False,
-            include_analysis_date=False,
         )
         return {
             "row": rows[0],
@@ -311,7 +342,6 @@ class DashboardRepository:
             "vw_topic_detail",
             filters=DashboardFilters(
                 analysis_window=filters.analysis_window,
-                analysis_date=filters.analysis_date,
                 topic_cluster=topic_cluster,
             ),
             extra_params=[("topic_cluster", f"eq.{topic_cluster}")],
@@ -326,7 +356,6 @@ class DashboardRepository:
             extra_params=[("topic_cluster", f"eq.{topic_cluster}")],
             limit=500,
             include_window_days=False,
-            include_analysis_date=False,
         )
         video_ids = [str(row.get("video_id")) for row in topic_links if row.get("video_id")]
         videos: list[dict[str, Any]] = []
@@ -338,7 +367,6 @@ class DashboardRepository:
                 order="overall_score.desc.nullslast",
                 limit=100,
                 include_window_days=False,
-                include_analysis_date=False,
             )
 
         return {
@@ -399,7 +427,6 @@ class DashboardRepository:
             extra_params=[("video_id", f"eq.{video_id}")],
             limit=1,
             include_window_days=False,
-            include_analysis_date=False,
         )
         if not rows:
             return None
@@ -411,23 +438,28 @@ class DashboardRepository:
         topics = self.list_topics(filters)
         underpackaged = self.list_videos(filters, video_type="underpackaged")
         overpackaged = self.list_videos(filters, video_type="overpackaged")
+        tracked_rows_count = len(niches) + len(channels) + len(topics) + len(underpackaged) + len(overpackaged)
+        high_confidence_count = sum(
+            1
+            for row in niches + channels + topics + underpackaged + overpackaged
+            if row.get("sample_confidence_level") == "high"
+            or row.get("underpackaged_confidence") == "high"
+            or row.get("overpackaged_confidence") == "high"
+        )
+        high_confidence_share = round((high_confidence_count / tracked_rows_count) * 100) if tracked_rows_count else 0
 
         return {
             "summary": {
-                "analysis_date": filters.analysis_date,
+                "analysis_date": None,
                 "analysis_window": filters.analysis_window,
                 "niches_count": len(niches),
                 "channels_count": len(channels),
                 "topics_count": len(topics),
                 "underpackaged_count": len(underpackaged),
                 "overpackaged_count": len(overpackaged),
-                "high_confidence_count": sum(
-                    1
-                    for row in niches + channels + topics + underpackaged + overpackaged
-                    if row.get("sample_confidence_level") == "high"
-                    or row.get("underpackaged_confidence") == "high"
-                    or row.get("overpackaged_confidence") == "high"
-                ),
+                "tracked_rows_count": tracked_rows_count,
+                "high_confidence_count": high_confidence_count,
+                "high_confidence_share": high_confidence_share,
             },
             "niches": niches[:5],
             "channels": channels[:5],

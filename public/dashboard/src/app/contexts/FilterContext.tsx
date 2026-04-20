@@ -1,41 +1,42 @@
 import { createContext, useContext, useEffect, useState, ReactNode } from 'react';
-import type { DashboardFiltersState } from '../lib/dashboard';
+import type { DashboardFiltersState, MetaResponse } from '../lib/dashboard';
 
 interface FilterContextType {
   filters: DashboardFiltersState;
   setFilters: (filters: DashboardFiltersState) => void;
   resetFilters: () => void;
+  meta: MetaResponse | null;
 }
 
-const defaultFilters: DashboardFiltersState = {
-  analysisWindow: '30',
-  analysisDate: '',
-  niche: '',
-  channelHandle: '',
-  topicCluster: '',
-  nicheGrowthStatus: '',
-  channelGrowthStatus: '',
-  topicType: '',
-  performanceLabel: '',
-  videoType: '',
-  sampleConfidence: '',
-  minSampleThreshold: '',
-};
+function createDefaultFilters(analysisWindow = '30'): DashboardFiltersState {
+  return {
+    analysisWindow,
+    niche: '',
+    channelHandle: '',
+    topicCluster: '',
+    nicheGrowthStatus: '',
+    channelGrowthStatus: '',
+    topicType: '',
+    performanceLabel: '',
+    videoType: '',
+    sampleConfidence: '',
+    minSampleThreshold: '',
+  };
+}
+
+const defaultFilters = createDefaultFilters();
 
 const FilterContext = createContext<FilterContextType | undefined>(undefined);
 
 export function FilterProvider({ children }: { children: ReactNode }) {
   const [filters, setFilters] = useState<DashboardFiltersState>(defaultFilters);
+  const [meta, setMeta] = useState<MetaResponse | null>(null);
 
   const resetFilters = () => {
-    setFilters(defaultFilters);
+    setFilters(createDefaultFilters(String(meta?.default_window_days ?? 30)));
   };
 
   useEffect(() => {
-    if (filters.analysisDate) {
-      return;
-    }
-
     const controller = new AbortController();
 
     fetch('/api/dashboard/meta', { signal: controller.signal })
@@ -45,10 +46,18 @@ export function FilterProvider({ children }: { children: ReactNode }) {
         }
         return response.json();
       })
-      .then((payload) => {
-        if (!controller.signal.aborted && payload?.latest_analysis_date) {
+      .then((payload: MetaResponse) => {
+        if (controller.signal.aborted) {
+          return;
+        }
+
+        setMeta(payload);
+
+        if (payload?.default_window_days && String(payload.default_window_days) !== defaultFilters.analysisWindow) {
           setFilters((current) =>
-            current.analysisDate ? current : { ...current, analysisDate: payload.latest_analysis_date }
+            current.analysisWindow === defaultFilters.analysisWindow
+              ? { ...current, analysisWindow: String(payload.default_window_days) }
+              : current
           );
         }
       })
@@ -57,10 +66,10 @@ export function FilterProvider({ children }: { children: ReactNode }) {
       });
 
     return () => controller.abort();
-  }, [filters.analysisDate]);
+  }, []);
 
   return (
-    <FilterContext.Provider value={{ filters, setFilters, resetFilters }}>
+    <FilterContext.Provider value={{ filters, setFilters, resetFilters, meta }}>
       {children}
     </FilterContext.Provider>
   );

@@ -13,7 +13,7 @@ import { ConfidenceBadge } from "../ui/ConfidenceBadge";
 import { ScoreBar } from "../ui/ScoreBar";
 import { Sparkline } from "../ui/Sparkline";
 import { StatusChip } from "../ui/StatusChip";
-import { Skeleton } from "../ui/skeleton";
+import { Spinner } from "../ui/spinner";
 
 type SortField =
   | "topic_replicability_score"
@@ -135,10 +135,8 @@ export function Topics() {
           </div>
 
           {loading ? (
-            <div className="space-y-3 p-4">
-              {Array.from({ length: 5 }).map((_, index) => (
-                <Skeleton key={index} className="h-16 w-full" />
-              ))}
+            <div className="flex min-h-[18rem] items-center justify-center p-4">
+              <Spinner />
             </div>
           ) : error ? (
             <div className="p-4 text-sm text-critical">{error}</div>
@@ -214,10 +212,8 @@ export function Topics() {
               Select a topic cluster to inspect the supporting channels and example videos.
             </div>
           ) : detailLoading ? (
-            <div className="space-y-3">
-              <Skeleton className="h-24 w-full" />
-              <Skeleton className="h-20 w-full" />
-              <Skeleton className="h-20 w-full" />
+            <div className="flex min-h-[16rem] items-center justify-center">
+              <Spinner />
             </div>
           ) : (
             <div className="space-y-4">

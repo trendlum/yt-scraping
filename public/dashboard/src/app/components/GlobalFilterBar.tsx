@@ -1,7 +1,49 @@
 import { useFilters } from '../contexts/FilterContext';
 
 export function GlobalFilterBar() {
-  const { filters, setFilters, resetFilters } = useFilters();
+  const { filters, setFilters, resetFilters, meta } = useFilters();
+  const windowOptions = meta?.available_window_days?.length ? meta.available_window_days : [30, 60, 90];
+  const nicheStatusOptions =
+    meta?.niche_growth_status_options?.length
+      ? meta.niche_growth_status_options
+      : [
+          "fast_emerging",
+          "early_rising",
+          "watchlist",
+          "weak_early_signal",
+          "confirmed_growing",
+          "confirmed_emerging",
+          "confirmed_stable",
+          "confirmed_volatile",
+          "confirmed_declining",
+        ];
+  const channelStatusOptions =
+    meta?.channel_growth_status_options?.length
+      ? meta.channel_growth_status_options
+      : [
+          "algorithmic_shift",
+          "improving_packaging",
+          "improving_sustainability",
+          "stable_improving",
+          "stable_flat",
+          "volatile",
+          "structural_decline",
+        ];
+  const topicTypeOptions =
+    meta?.topic_type_options?.length
+      ? meta.topic_type_options
+      : [
+          "replicable",
+          "sustained_traction",
+          "algorithmic",
+          "slow_burner",
+          "fragile",
+          "deceptive_packaging",
+        ];
+  const performanceLabelOptions =
+    meta?.performance_label_options?.length
+      ? meta.performance_label_options
+      : ["explosive", "strong", "solid", "underperforming", "weak", "declining"];
 
   return (
     <div className="sticky top-[49px] z-40 border-b border-border bg-card/95 backdrop-blur">
@@ -12,17 +54,12 @@ export function GlobalFilterBar() {
             value={filters.analysisWindow}
             onChange={(e) => setFilters({ ...filters, analysisWindow: e.target.value })}
           >
-            <option value="30">30 days</option>
-            <option value="60">60 days</option>
-            <option value="90">90 days</option>
+            {windowOptions.map((windowDays) => (
+              <option key={windowDays} value={String(windowDays)}>
+                {windowDays} days
+              </option>
+            ))}
           </select>
-
-          <input
-            type="date"
-            className="bg-input border border-border rounded px-2.5 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-primary text-foreground"
-            value={filters.analysisDate}
-            onChange={(e) => setFilters({ ...filters, analysisDate: e.target.value })}
-          />
 
           <input
             type="text"
@@ -54,15 +91,11 @@ export function GlobalFilterBar() {
             onChange={(e) => setFilters({ ...filters, nicheGrowthStatus: e.target.value })}
           >
             <option value="">Niche status</option>
-            <option value="fast_emerging">Fast emerging</option>
-            <option value="early_rising">Early rising</option>
-            <option value="watchlist">Watchlist</option>
-            <option value="weak_early_signal">Weak early signal</option>
-            <option value="confirmed_growing">Confirmed growing</option>
-            <option value="confirmed_emerging">Confirmed emerging</option>
-            <option value="confirmed_stable">Confirmed stable</option>
-            <option value="confirmed_volatile">Confirmed volatile</option>
-            <option value="confirmed_declining">Confirmed declining</option>
+            {nicheStatusOptions.map((option) => (
+              <option key={option} value={option}>
+                {option.replace(/_/g, ' ')}
+              </option>
+            ))}
           </select>
 
           <select
@@ -71,13 +104,11 @@ export function GlobalFilterBar() {
             onChange={(e) => setFilters({ ...filters, channelGrowthStatus: e.target.value })}
           >
             <option value="">Channel status</option>
-            <option value="algorithmic_shift">Algorithmic shift</option>
-            <option value="improving_packaging">Improving packaging</option>
-            <option value="improving_sustainability">Improving sustainability</option>
-            <option value="stable_improving">Stable improving</option>
-            <option value="stable_flat">Stable flat</option>
-            <option value="volatile">Volatile</option>
-            <option value="structural_decline">Structural decline</option>
+            {channelStatusOptions.map((option) => (
+              <option key={option} value={option}>
+                {option.replace(/_/g, ' ')}
+              </option>
+            ))}
           </select>
 
           <select
@@ -86,12 +117,11 @@ export function GlobalFilterBar() {
             onChange={(e) => setFilters({ ...filters, topicType: e.target.value })}
           >
             <option value="">Topic type</option>
-            <option value="replicable">Replicable</option>
-            <option value="sustained_traction">Sustained traction</option>
-            <option value="algorithmic">Algorithmic</option>
-            <option value="slow_burner">Slow burner</option>
-            <option value="fragile">Fragile</option>
-            <option value="deceptive_packaging">Deceptive packaging</option>
+            {topicTypeOptions.map((option) => (
+              <option key={option} value={option}>
+                {option.replace(/_/g, ' ')}
+              </option>
+            ))}
           </select>
 
           <select
@@ -100,12 +130,11 @@ export function GlobalFilterBar() {
             onChange={(e) => setFilters({ ...filters, performanceLabel: e.target.value })}
           >
             <option value="">Performance label</option>
-            <option value="explosive">Explosive</option>
-            <option value="strong">Strong</option>
-            <option value="solid">Solid</option>
-            <option value="underperforming">Underperforming</option>
-            <option value="weak">Weak</option>
-            <option value="declining">Declining</option>
+            {performanceLabelOptions.map((option) => (
+              <option key={option} value={option}>
+                {option.replace(/_/g, ' ')}
+              </option>
+            ))}
           </select>
 
           <select
