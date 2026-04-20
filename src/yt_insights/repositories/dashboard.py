@@ -32,7 +32,6 @@ class DashboardFilters:
     performance_label: str | None = None
     video_type: str | None = None
     sample_confidence: str | None = None
-    min_sample_threshold: int | None = None
 
 
 class DashboardRepository:
@@ -193,12 +192,6 @@ class DashboardRepository:
                 if row.get("niche_growth_status_early") == filters.niche_growth_status
                 or row.get("niche_growth_status_confirmed") == filters.niche_growth_status
             ]
-        if filters.min_sample_threshold is not None:
-            rows = [
-                row
-                for row in rows
-                if int(row.get("video_count_total") or 0) >= filters.min_sample_threshold
-            ]
         return rows
 
     def get_niche_detail(self, filters: DashboardFilters, niche: str) -> dict[str, Any] | None:
@@ -272,12 +265,6 @@ class DashboardRepository:
             rows = [row for row in rows if _contains(row.get("channel_handle"), filters.channel_handle)]
         if filters.niche:
             rows = [row for row in rows if _contains(row.get("channel_niche"), filters.niche)]
-        if filters.min_sample_threshold is not None:
-            rows = [
-                row
-                for row in rows
-                if int(row.get("video_count_recent") or 0) >= filters.min_sample_threshold
-            ]
         return rows
 
     def get_channel_detail(self, filters: DashboardFilters, channel_handle: str) -> dict[str, Any] | None:
@@ -329,12 +316,6 @@ class DashboardRepository:
         )
         if filters.topic_cluster:
             rows = [row for row in rows if _contains(row.get("topic_cluster"), filters.topic_cluster)]
-        if filters.min_sample_threshold is not None:
-            rows = [
-                row
-                for row in rows
-                if int(row.get("video_count") or 0) >= filters.min_sample_threshold
-            ]
         return rows
 
     def get_topic_detail(self, filters: DashboardFilters, topic_cluster: str) -> dict[str, Any] | None:

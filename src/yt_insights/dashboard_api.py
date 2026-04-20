@@ -32,7 +32,6 @@ def _parse_filters(query: dict[str, list[str]]) -> DashboardFilters:
         return value or None
 
     window_value = first("analysis_window")
-    threshold_value = first("min_sample_threshold")
     return DashboardFilters(
         analysis_window=int(window_value) if window_value else None,
         niche=first("niche"),
@@ -44,7 +43,6 @@ def _parse_filters(query: dict[str, list[str]]) -> DashboardFilters:
         performance_label=first("performance_label"),
         video_type=first("video_type"),
         sample_confidence=first("sample_confidence"),
-        min_sample_threshold=int(threshold_value) if threshold_value else None,
     )
 
 

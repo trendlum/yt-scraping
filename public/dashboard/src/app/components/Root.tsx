@@ -1,4 +1,4 @@
-import { Outlet, NavLink } from 'react-router';
+import { Outlet, Link, NavLink } from 'react-router';
 import { GlobalFilterBar } from './GlobalFilterBar';
 import { FilterProvider } from '../contexts/FilterContext';
 
@@ -10,11 +10,13 @@ export function Root() {
           <div className="px-6 py-3">
             <div className="flex items-center justify-between gap-4">
               <div className="flex items-center">
-                <img
-                  src="/images/transparent_logo_with_name.png"
-                  alt="TrendLum"
-                  className="block h-6 w-auto max-h-6 object-contain"
-                />
+                <Link to="/" aria-label="Go to Overview" className="inline-flex items-center">
+                  <img
+                    src="/images/transparent_logo_with_name.png"
+                    alt="TrendLum"
+                    className="block h-6 w-auto max-h-6 object-contain"
+                  />
+                </Link>
               </div>
               <nav className="flex gap-1">
                 <NavLink

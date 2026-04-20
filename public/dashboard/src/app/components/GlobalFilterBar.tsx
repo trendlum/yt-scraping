@@ -158,16 +158,6 @@ export function GlobalFilterBar() {
             <option value="low">Low</option>
           </select>
 
-          <input
-            type="number"
-            min="0"
-            step="1"
-            placeholder="Min sample"
-            className="bg-input border border-border rounded px-2.5 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-primary w-24 text-foreground placeholder:text-muted-foreground"
-            value={filters.minSampleThreshold}
-            onChange={(e) => setFilters({ ...filters, minSampleThreshold: e.target.value })}
-          />
-
           <button
             className="ml-auto text-xs text-muted-foreground hover:text-primary transition"
             onClick={resetFilters}

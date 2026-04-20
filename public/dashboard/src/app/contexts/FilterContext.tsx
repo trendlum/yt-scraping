@@ -20,7 +20,6 @@ function createDefaultFilters(analysisWindow = '30'): DashboardFiltersState {
     performanceLabel: '',
     videoType: '',
     sampleConfidence: '',
-    minSampleThreshold: '',
   };
 }
 

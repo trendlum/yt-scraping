@@ -11,7 +11,6 @@ export interface DashboardFiltersState {
   performanceLabel: string;
   videoType: string;
   sampleConfidence: string;
-  minSampleThreshold: string;
 }
 
 export interface NicheRow {
@@ -247,7 +246,6 @@ const filterParamMap: Record<keyof DashboardFiltersState, string> = {
   performanceLabel: "performance_label",
   videoType: "video_type",
   sampleConfidence: "sample_confidence",
-  minSampleThreshold: "min_sample_threshold",
 };
 
 export function buildDashboardQuery(

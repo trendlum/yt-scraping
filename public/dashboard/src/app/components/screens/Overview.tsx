@@ -37,7 +37,6 @@ export function Overview() {
   const { data, loading, error } = useDashboardQuery<OverviewResponse>("/api/dashboard/overview", query);
 
   const summary = data?.summary;
-  const highConfidenceCount = summary?.high_confidence_count ?? 0;
   const totalTracked = summary?.tracked_rows_count ?? 0;
   const highConfidenceShare = summary?.high_confidence_share ?? 0;
 
@@ -60,7 +59,7 @@ export function Overview() {
         <KPICard label="Replicable topics" value={summary?.topics_count ?? 0} />
         <KPICard label="Underpackaged videos" value={summary?.underpackaged_count ?? 0} />
         <KPICard label="Overpackaged videos" value={summary?.overpackaged_count ?? 0} />
-        <KPICard label="High confidence" value={highConfidenceShare} delta={highConfidenceCount} />
+        <KPICard label="High confidence" value={highConfidenceShare} />
       </div>
 
       <div className="grid gap-4 xl:grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)]">
