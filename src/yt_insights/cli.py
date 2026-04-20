@@ -11,6 +11,8 @@ from .constants import (
     DEFAULT_BASELINE_WINDOW_DAYS,
     DEFAULT_FEATURE_WORKERS,
     DEFAULT_MONITOR_DAYS,
+    DEFAULT_TOPIC_CLUSTER_PAGE_SIZE,
+    DEFAULT_TOPIC_CLUSTER_WORKERS,
     DEFAULT_TIMEOUT,
 )
 from .exceptions import ConfigurationError, SupabaseAPIError, YouTubeAPIError
@@ -58,6 +60,18 @@ def build_argument_parser() -> argparse.ArgumentParser:
         type=int,
         default=DEFAULT_FEATURE_WORKERS,
         help="Maximum worker threads used to enrich thumbnails.",
+    )
+    parser.add_argument(
+        "--topic-cluster-workers",
+        type=int,
+        default=DEFAULT_TOPIC_CLUSTER_WORKERS,
+        help="Maximum worker threads used for topic clustering calls.",
+    )
+    parser.add_argument(
+        "--topic-cluster-page-size",
+        type=int,
+        default=DEFAULT_TOPIC_CLUSTER_PAGE_SIZE,
+        help="Batch size used to scan videos for topic clustering updates.",
     )
     parser.add_argument(
         "--log-level",
@@ -112,6 +126,8 @@ def main() -> int:
                 monitor_days=args.monitor_days,
                 baseline_window_days=args.baseline_window_days,
                 feature_workers=args.feature_workers,
+                topic_cluster_workers=args.topic_cluster_workers,
+                topic_cluster_page_size=args.topic_cluster_page_size,
             )
     except (ConfigurationError, YouTubeAPIError, SupabaseAPIError, ValueError) as exc:
         raise SystemExit(str(exc)) from exc

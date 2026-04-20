@@ -357,6 +357,13 @@ class VideoFeatureRecord:
     contains_chart: bool | None = None
     contains_map: bool | None = None
     visual_style: str | None = None
+    format_type: str | None = None
+    promise_type: str | None = None
+    topic_cluster_status: str = "pending"
+    topic_cluster_model: str | None = None
+    topic_cluster_input_fingerprint: str | None = None
+    topic_cluster_extracted_at: datetime | None = None
+    topic_cluster_error: str | None = None
 
     def to_row(self) -> dict[str, Any]:
         return {
@@ -395,5 +402,12 @@ class VideoFeatureRecord:
             "contains_chart": self.contains_chart,
             "contains_map": self.contains_map,
             "visual_style": self.visual_style,
+            "format_type": self.format_type,
+            "promise_type": self.promise_type,
+            "topic_cluster_status": self.topic_cluster_status,
+            "topic_cluster_model": self.topic_cluster_model,
+            "topic_cluster_input_fingerprint": self.topic_cluster_input_fingerprint,
+            "topic_cluster_extracted_at": serialize_datetime(self.topic_cluster_extracted_at),
+            "topic_cluster_error": self.topic_cluster_error,
             "updated_at": serialize_datetime(self.extracted_at),
         }

@@ -15,11 +15,14 @@ from ..constants import (
     DEFAULT_BASELINE_WINDOW_DAYS,
     DEFAULT_FEATURE_WORKERS,
     DEFAULT_MONITOR_DAYS,
+    DEFAULT_TOPIC_CLUSTER_PAGE_SIZE,
+    DEFAULT_TOPIC_CLUSTER_WORKERS,
     DEFAULT_TIMEOUT,
 )
 from ..exceptions import YouTubeAPIError
 from ..models import ChannelScrapeResult, utc_now
 from ..repositories.supabase import SupabaseRepository
+from .topic_clustering import TopicClusterClient, run_topic_cluster_backfill
 
 
 LOGGER = logging.getLogger(__name__)
@@ -206,6 +209,9 @@ def run_batch_scrape(
     feature_workers: int | None = DEFAULT_FEATURE_WORKERS,
     executed_at: datetime | None = None,
     thumbnail_extractor: ThumbnailFeatureExtractor | None = None,
+    topic_cluster_client: TopicClusterClient | None = None,
+    topic_cluster_workers: int = DEFAULT_TOPIC_CLUSTER_WORKERS,
+    topic_cluster_page_size: int = DEFAULT_TOPIC_CLUSTER_PAGE_SIZE,
 ) -> list[dict]:
     run_started_at = executed_at or utc_now()
     monitor_cutoff = run_started_at - timedelta(days=monitor_days)
@@ -273,6 +279,13 @@ def run_batch_scrape(
     repository.upsert_current_videos(current_rows)
     repository.insert_snapshots(snapshot_rows)
     repository.upsert_feature_rows(feature_rows)
+    run_topic_cluster_backfill(
+        repository,
+        client=topic_cluster_client,
+        executed_at=run_started_at,
+        workers=topic_cluster_workers,
+        page_size=topic_cluster_page_size,
+    )
 
     processed_handles = [result.channel_handle for result in results]
     snapshots = repository.get_snapshots_for_channels(
@@ -329,6 +342,8 @@ def scrape_and_store_channels(
     monitor_days: int = DEFAULT_MONITOR_DAYS,
     baseline_window_days: int = DEFAULT_BASELINE_WINDOW_DAYS,
     feature_workers: int | None = DEFAULT_FEATURE_WORKERS,
+    topic_cluster_workers: int = DEFAULT_TOPIC_CLUSTER_WORKERS,
+    topic_cluster_page_size: int = DEFAULT_TOPIC_CLUSTER_PAGE_SIZE,
 ) -> list[dict]:
     youtube_client = YouTubeClient(api_key, timeout=timeout)
     repository = SupabaseRepository(
@@ -345,4 +360,6 @@ def scrape_and_store_channels(
         monitor_days=monitor_days,
         baseline_window_days=baseline_window_days,
         feature_workers=feature_workers,
+        topic_cluster_workers=topic_cluster_workers,
+        topic_cluster_page_size=topic_cluster_page_size,
     )

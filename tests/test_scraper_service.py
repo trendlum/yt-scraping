@@ -61,9 +61,12 @@ class FakeRepository:
         self.current_rows: list[dict] = []
         self.snapshot_rows: list[dict] = []
         self.feature_rows: list[dict] = []
+        self.original_feature_rows: list[dict] = []
         self.performance_rows: list[dict] = []
         self.updated_at = None
         self.existing_feature_rows: dict[str, dict] = {}
+        self.topic_candidates: list[dict] = []
+        self.replaced_topics: dict[str, list[str]] = {}
 
     def get_active_channel_configs(self) -> list[dict]:
         return [{"channel_handle": "@channel", "thumbnail_analysis": True}]
@@ -85,7 +88,17 @@ class FakeRepository:
         self.snapshot_rows = rows
 
     def upsert_feature_rows(self, rows: list[dict]) -> None:
+        if rows and "title_pattern" in rows[0]:
+            self.original_feature_rows = rows
         self.feature_rows = rows
+
+    def list_topic_cluster_candidates(self, *, limit: int = 200, offset: int = 0) -> list[dict]:
+        if not self.topic_candidates:
+            return []
+        return self.topic_candidates[offset:offset + limit]
+
+    def replace_video_topics(self, topics_by_video_id: dict[str, list[str]]) -> None:
+        self.replaced_topics.update(topics_by_video_id)
 
     def get_snapshots_for_channels(self, channel_handles: list[str], *, published_after, limit: int = 5000):
         return [
@@ -152,9 +165,9 @@ def test_run_batch_scrape_persists_current_rows_snapshots_and_features() -> None
     assert len(result) == 1
     assert len(repo.current_rows) == 2
     assert len(repo.snapshot_rows) == 2
-    assert len(repo.feature_rows) == 2
-    assert all(row["thumbnail_feature_status"] == "no_thumbnail" for row in repo.feature_rows)
-    assert all(row["thumbnail_ocr_status"] == "no_thumbnail" for row in repo.feature_rows)
+    assert len(repo.original_feature_rows) == 2
+    assert all(row["thumbnail_feature_status"] == "no_thumbnail" for row in repo.original_feature_rows)
+    assert all(row["thumbnail_ocr_status"] == "no_thumbnail" for row in repo.original_feature_rows)
     assert repo.updated_at == datetime(2026, 4, 13, tzinfo=timezone.utc)
 
 
@@ -178,9 +191,9 @@ def test_run_batch_scrape_skips_thumbnail_analysis_when_disabled() -> None:
 
     assert len(result) == 1
     assert thumbnail_extractor.calls == 0
-    assert all(row["thumbnail_feature_status"] == "skipped" for row in repo.feature_rows)
-    assert all(row["thumbnail_ocr_status"] == "skipped" for row in repo.feature_rows)
-    assert all(row["thumbnail_text"] is None for row in repo.feature_rows)
+    assert all(row["thumbnail_feature_status"] == "skipped" for row in repo.original_feature_rows)
+    assert all(row["thumbnail_ocr_status"] == "skipped" for row in repo.original_feature_rows)
+    assert all(row["thumbnail_text"] is None for row in repo.original_feature_rows)
 
 
 def test_run_batch_scrape_reuses_existing_thumbnail_features_when_thumbnail_unchanged() -> None:
@@ -239,8 +252,8 @@ def test_run_batch_scrape_reuses_existing_thumbnail_features_when_thumbnail_unch
     )
 
     assert thumbnail_extractor.calls == 1
-    assert len(repo.feature_rows) == 2
-    reused_row = next(row for row in repo.feature_rows if row["video_id"] == "new-video")
+    assert len(repo.original_feature_rows) == 2
+    reused_row = next(row for row in repo.original_feature_rows if row["video_id"] == "new-video")
     assert reused_row["thumbnail_text"] == "BIG MOVE"
 
 
@@ -300,5 +313,132 @@ def test_run_batch_scrape_retries_thumbnail_when_previous_status_was_download_fa
     )
 
     assert thumbnail_extractor.calls == 2
-    retried_row = next(row for row in repo.feature_rows if row["video_id"] == "new-video")
+    retried_row = next(row for row in repo.original_feature_rows if row["video_id"] == "new-video")
     assert retried_row["thumbnail_feature_status"] == "no_thumbnail"
+
+
+def test_run_batch_scrape_runs_topic_clustering_for_all_candidate_videos() -> None:
+    class FakeTopicClusterClient:
+        @property
+        def prompt(self):
+            from yt_insights.services.topic_clustering import load_topic_cluster_prompt
+
+            return load_topic_cluster_prompt()
+
+        @property
+        def model(self) -> str:
+            return "deepseek-reasoner"
+
+        def classify(self, *, title: str, thumbnail_text: str | None, channel_niche: str):
+            from yt_insights.ai_usage import AiUsage
+            from yt_insights.services.topic_clustering import TopicClusterResult
+
+            return TopicClusterResult(
+                topic_clusters=["bitcoin etf flows"],
+                format_type="news_breakdown",
+                promise_type="news",
+                usage=AiUsage(prompt_tokens=10, completion_tokens=5, total_tokens=15, calls=1),
+                model="deepseek-reasoner",
+                provider="deepseek",
+            )
+
+    repo = FakeRepository()
+    executed_at = datetime(2026, 4, 13, tzinfo=timezone.utc)
+    run_batch_scrape(
+        FakeYouTubeClient(),
+        repo,
+        limit=10,
+        monitor_days=30,
+        baseline_window_days=30,
+        feature_workers=1,
+        executed_at=executed_at,
+    )
+
+    repo.topic_candidates = [
+        {
+            "video_id": row["video_id"],
+            "channel_handle": row["channel_handle"],
+            "title": row["source_title"],
+            "channel_niche": "crypto",
+            "feature_row": row,
+        }
+        for row in repo.original_feature_rows
+    ]
+
+    run_batch_scrape(
+        FakeYouTubeClient(),
+        repo,
+        limit=10,
+        monitor_days=30,
+        baseline_window_days=30,
+        feature_workers=1,
+        executed_at=executed_at,
+        topic_cluster_client=FakeTopicClusterClient(),
+    )
+
+    assert repo.replaced_topics == {
+        "new-video": ["bitcoin etf flows"],
+        "stored-video": ["bitcoin etf flows"],
+    }
+    assert all(row["topic_cluster_status"] == "complete" for row in repo.feature_rows)
+    assert all(row["topic_clusters"] == ["bitcoin etf flows"] for row in repo.feature_rows)
+
+
+def test_run_batch_scrape_skips_videos_that_already_have_topic_cluster_fields() -> None:
+    class FailingTopicClusterClient:
+        @property
+        def prompt(self):
+            from yt_insights.services.topic_clustering import load_topic_cluster_prompt
+
+            return load_topic_cluster_prompt()
+
+        @property
+        def model(self) -> str:
+            return "deepseek-chat"
+
+        def classify(self, *, title: str, thumbnail_text: str | None, channel_niche: str):
+            raise AssertionError("LLM should not be called for already completed rows")
+
+    repo = FakeRepository()
+    executed_at = datetime(2026, 4, 13, tzinfo=timezone.utc)
+    run_batch_scrape(
+        FakeYouTubeClient(),
+        repo,
+        limit=10,
+        monitor_days=30,
+        baseline_window_days=30,
+        feature_workers=1,
+        executed_at=executed_at,
+    )
+
+    complete_row = dict(repo.original_feature_rows[0])
+    complete_row.update(
+        {
+            "topic_cluster_status": "complete",
+            "topic_clusters": ["bitcoin etf flows"],
+            "format_type": "news_breakdown",
+            "promise_type": "news",
+        }
+    )
+    repo.topic_candidates = [
+        {
+            "video_id": complete_row["video_id"],
+            "channel_handle": complete_row["channel_handle"],
+            "title": complete_row["source_title"],
+            "channel_niche": "crypto",
+            "feature_row": complete_row,
+        }
+    ]
+
+    run_batch_scrape(
+        FakeYouTubeClient(),
+        repo,
+        limit=10,
+        monitor_days=30,
+        baseline_window_days=30,
+        feature_workers=1,
+        executed_at=executed_at,
+        topic_cluster_client=FailingTopicClusterClient(),
+    )
+
+    assert repo.replaced_topics == {}

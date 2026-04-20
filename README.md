@@ -41,6 +41,9 @@ Variables de entorno soportadas:
 - `YT_API_KEY`
 - `SUPABASE_URL`
 - `SUPABASE_SERVICE_ROLE_KEY`
+- `DEEPSEEK_API_KEY`
+- `DEEPSEEK_BASE_URL`
+- `TOPIC_CLUSTER_MODEL`
 
 ## Cambios necesarios en Supabase
 
@@ -73,7 +76,7 @@ python -m yt_insights --channel-handle @handle --limit 10
 Batch con persistencia y analytics:
 
 ```bash
-python -m yt_insights --monitor-days 30 --baseline-window-days 30 --feature-workers 8 --output latest_run.json
+python -m yt_insights --monitor-days 30 --baseline-window-days 30 --feature-workers 8 --topic-cluster-workers 8 --output latest_run.json
 ```
 
 Compatibilidad legacy:
@@ -90,6 +93,8 @@ python thumbnail_test.py <thumbnail_url_o_path>
 - Reutiliza vídeos ya conocidos en `yt_videos` dentro de esa ventana para seguir acumulando snapshots.
 - Calcula baselines y ratios por canal sobre una ventana de publicación de `--baseline-window-days`.
 - Descarga thumbnails y rellena `has_face`, `face_count`, `has_thumbnail_text`, `estimated_thumbnail_text_tokens`, `thumbnail_ocr_status`, `thumbnail_text`, `thumbnail_text_confidence`, `dominant_colors`, `composition_type`, `contains_chart`, `contains_map` y `visual_style`.
+- Recorre todos los videos de `yt_videos`, recalcula solo los `topic_clusters` cuyo input o prompt haya cambiado, guarda `format_type` y `promise_type` en `yt_video_features` y sincroniza los `topic_clusters` normalizados en `yt_video_topics`.
+- Registra uso y coste aproximado de tokens para la fase de `topic_cluster`; con DeepSeek aprovecha el context caching automatico si el prefijo del prompt se mantiene estable.
 
 ## Tests
 

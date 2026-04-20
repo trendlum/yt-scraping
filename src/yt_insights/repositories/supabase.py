@@ -22,7 +22,7 @@ class SupabaseRepository:
             "GET",
             "yt_channels",
             params={
-                "select": "channel_handle,thumbnail_analysis",
+                "select": "channel_handle,thumbnail_analysis,channel_niche",
                 "is_active": "eq.true",
                 "order": "id.asc",
             },
@@ -31,6 +31,7 @@ class SupabaseRepository:
             {
                 "channel_handle": row["channel_handle"],
                 "thumbnail_analysis": bool(row.get("thumbnail_analysis")),
+                "channel_niche": row.get("channel_niche"),
             }
             for row in payload or []
             if row.get("channel_handle")
@@ -92,6 +93,63 @@ class SupabaseRepository:
             if row.get("video_id")
         }
 
+    def get_channel_niches(self, channel_handles: list[str], *, limit: int = 5000) -> dict[str, str | None]:
+        if not channel_handles:
+            return {}
+
+        payload = self.client.request(
+            "GET",
+            "yt_channels",
+            params={
+                "select": "channel_handle,channel_niche",
+                "channel_handle": _format_in_filter(channel_handles),
+                "limit": limit,
+            },
+        )
+        return {
+            str(row["channel_handle"]): row.get("channel_niche")
+            for row in payload or []
+            if row.get("channel_handle")
+        }
+
+    def list_topic_cluster_candidates(self, *, limit: int = 200, offset: int = 0) -> list[dict[str, Any]]:
+        videos = self.client.request(
+            "GET",
+            "yt_videos",
+            params={
+                "select": "video_id,channel_handle,title",
+                "order": "video_id.asc",
+                "limit": limit,
+                "offset": offset,
+            },
+        ) or []
+        if not videos:
+            return []
+
+        video_ids = [str(row["video_id"]) for row in videos if row.get("video_id")]
+        feature_rows = self.get_feature_rows(video_ids, limit=max(limit, len(video_ids)))
+        channel_niches = self.get_channel_niches(
+            [str(row["channel_handle"]) for row in videos if row.get("channel_handle")],
+            limit=max(limit, len(videos)),
+        )
+        candidates: list[dict[str, Any]] = []
+        for video in videos:
+            video_id = str(video.get("video_id") or "")
+            feature_row = feature_rows.get(video_id)
+            if feature_row is None:
+                continue
+            channel_handle = str(video.get("channel_handle") or "")
+            candidates.append(
+                {
+                    "video_id": video_id,
+                    "channel_handle": channel_handle,
+                    "title": video.get("title"),
+                    "channel_niche": channel_niches.get(channel_handle),
+                    "feature_row": feature_row,
+                }
+            )
+        return candidates
+
     def get_snapshots_for_channels(
         self,
         channel_handles: list[str],
@@ -147,6 +205,71 @@ class SupabaseRepository:
 
     def upsert_feature_rows(self, rows: list[dict[str, Any]]) -> None:
         self._upsert_rows("yt_video_features", rows, on_conflict="video_id")
+
+    def replace_video_topics(self, topics_by_video_id: dict[str, list[str]]) -> None:
+        if not topics_by_video_id:
+            return
+
+        self.client.request(
+            "DELETE",
+            "yt_video_topics",
+            params={"video_id": _format_in_filter(list(topics_by_video_id.keys()))},
+        )
+        rows = [
+            {"video_id": video_id, "topic_cluster": topic_cluster}
+            for video_id, topic_clusters in topics_by_video_id.items()
+            for topic_cluster in topic_clusters
+        ]
+        if rows:
+            self._upsert_rows("yt_video_topics", rows, on_conflict="video_id,topic_cluster")
+
+    def get_topic_cluster_debug_inputs(self, video_ids: list[str], *, limit: int = 5000) -> list[dict[str, Any]]:
+        if not video_ids:
+            return []
+
+        videos_payload = self.client.request(
+            "GET",
+            "yt_videos",
+            params={
+                "select": "video_id,channel_handle,title",
+                "video_id": _format_in_filter(video_ids),
+                "limit": limit,
+            },
+        ) or []
+        if not videos_payload:
+            return []
+
+        feature_rows = self.get_feature_rows(video_ids, limit=limit)
+        channel_niches = self.get_channel_niches(
+            [str(row["channel_handle"]) for row in videos_payload if row.get("channel_handle")],
+            limit=limit,
+        )
+        videos_by_id = {
+            str(row["video_id"]): row
+            for row in videos_payload
+            if row.get("video_id")
+        }
+
+        ordered_rows: list[dict[str, Any]] = []
+        for video_id in video_ids:
+            video_row = videos_by_id.get(video_id)
+            if video_row is None:
+                continue
+            channel_handle = str(video_row.get("channel_handle") or "")
+            feature_row = feature_rows.get(video_id, {})
+            ordered_rows.append(
+                {
+                    "video_id": video_id,
+                    "channel_handle": channel_handle,
+                    "title": video_row.get("title"),
+                    "thumbnail_text": feature_row.get("thumbnail_text"),
+                    "channel_niche": channel_niches.get(channel_handle),
+                    "existing_format_type": feature_row.get("format_type"),
+                    "existing_promise_type": feature_row.get("promise_type"),
+                    "existing_topic_cluster_status": feature_row.get("topic_cluster_status"),
+                }
+            )
+        return ordered_rows
 
     def update_scraper_state(
         self,

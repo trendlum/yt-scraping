@@ -1,0 +1,116 @@
+prompt:
+  description: Extract topic clusters, format_type and promise_type from a YouTube video
+  model: deepseek
+  input:
+    - title
+    - thumbnail_text
+    - channel_niche
+
+  system: |
+    Analyze the title, thumbnail text, and channel niche of a YouTube video and extract structured metadata.
+
+    --- DEFINITIONS ---
+
+    topic_clusters:
+    A concise thematic label (2–5 words) describing a SPECIFIC and REUSABLE topic.
+    It must be granular enough to group similar videos, but not so specific that it only applies to one video.
+
+    GOOD examples:
+    - "bitcoin ETF flows"
+    - "NBA player contracts"
+    - "interest rates and mortgages"
+
+    BAD examples:
+    - "bitcoin"
+    - "finance"
+    - "what happens next"
+    - full sentence summaries
+
+    format_type:
+    How the video is narratively structured. Choose ONE:
+    - data_analysis
+    - news_breakdown
+    - explainer
+    - opinion_take
+    - prediction_forecast
+    - comparison
+    - case_study
+    - interview
+    - reaction
+    - listicle
+
+    promise_type:
+    What the title and thumbnail promise BEFORE clicking.
+    Use ONLY title + thumbnail_text.
+
+    Choose ONE:
+    - revelation
+    - warning
+    - how_to
+    - explanation
+    - prediction
+    - comparison
+    - opinion
+    - news
+    - deep_dive
+
+    --- IMPORTANT RULES ---
+
+    - Return 1–3 topic_clusters.
+    - Topics MUST be aligned with the channel_niche.
+    - Prefer reusable topics across multiple videos.
+    - Do NOT generate overly generic or overly specific topics.
+    - Avoid synonyms or duplicates.
+    - Use lowercase, no punctuation, no stopwords.
+    - topic_clusters must be 2–5 words max.
+
+    - format_type must be EXACTLY one value from the enum.
+    - promise_type must be inferred ONLY from title and thumbnail_text.
+
+    - If information is ambiguous, choose the MOST LIKELY interpretation given the niche.
+
+    --- OUTPUT ---
+
+    Return ONLY valid JSON. No explanations.
+
+    {
+      "topic_clusters": ["...", "..."],
+      "format_type": "...",
+      "promise_type": "..."
+    }
+
+  examples:
+    - title: "The Spanish real estate market is BREAKING DOWN"
+      thumbnail_text: "What banks won't tell you"
+      channel_niche: "economy"
+      output: |
+        {"topic_clusters": ["spanish real estate market", "interest rates and mortgages"], "format_type": "news_breakdown", "promise_type": "revelation"}
+
+    - title: "Nvidia Q3 Results: What Do They Mean for the Sector?"
+      thumbnail_text: "Semiconductors 2025"
+      channel_niche: "markets"
+      output: |
+        {"topic_clusters": ["nvidia earnings analysis", "semiconductor outlook"], "format_type": "data_analysis", "promise_type": "explanation"}
+
+    - title: "Why This NBA Player Went BROKE"
+      thumbnail_text: "Lost it all"
+      channel_niche: "sports"
+      output: |
+        {"topic_clusters": ["nba player finances", "athlete bankruptcy cases"], "format_type": "case_study", "promise_type": "revelation"}
+
+    - title: "Bitcoin ETF Inflows Are Exploding"
+      thumbnail_text: "BlackRock is buying"
+      channel_niche: "crypto"
+      output: |
+        {"topic_clusters": ["bitcoin etf flows", "institutional bitcoin demand"], "format_type": "news_breakdown", "promise_type": "news"}
+
+    - title: "Top 5 AI Tools You NEED in 2025"
+      thumbnail_text: "Automate everything"
+      channel_niche: "technology"
+      output: |
+        {"topic_clusters": ["ai tools productivity", "workflow automation"], "format_type": "listicle", "promise_type": "how_to"}
+
+  user_message: |
+    Channel niche: {{channel_niche}}
+    Title: {{title}}
+    Thumbnail text: {{thumbnail_text}}
