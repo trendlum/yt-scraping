@@ -74,6 +74,28 @@ class SupabaseRepository:
         )
         return [row["video_id"] for row in payload or [] if row.get("video_id")]
 
+    def get_current_video_rows(self, video_ids: list[str], *, limit: int = 5000) -> dict[str, dict[str, Any]]:
+        if not video_ids:
+            return {}
+
+        payload = self.client.request(
+            "GET",
+            "yt_videos",
+            params={
+                "select": (
+                    "video_id,channel_handle,title,published_at,thumbnail_url,"
+                    "view_count,like_count,comment_count,duration,duration_iso8601,video_url"
+                ),
+                "video_id": _format_in_filter(video_ids),
+                "limit": limit,
+            },
+        )
+        return {
+            str(row["video_id"]): row
+            for row in payload or []
+            if row.get("video_id")
+        }
+
     def get_feature_rows(self, video_ids: list[str], *, limit: int = 5000) -> dict[str, dict[str, Any]]:
         if not video_ids:
             return {}
@@ -112,38 +134,41 @@ class SupabaseRepository:
             if row.get("channel_handle")
         }
 
-    def list_topic_cluster_candidates(self, *, limit: int = 200, offset: int = 0) -> list[dict[str, Any]]:
-        videos = self.client.request(
+    def list_topic_cluster_candidates(
+        self,
+        *,
+        limit: int = 200,
+        after_video_id: str | None = None,
+    ) -> list[dict[str, Any]]:
+        params: dict[str, Any] = {
+            "select": "*",
+            "order": "video_id.asc",
+            "limit": limit,
+        }
+        if after_video_id:
+            params["video_id"] = f"gt.{after_video_id}"
+
+        feature_rows = self.client.request(
             "GET",
-            "yt_videos",
-            params={
-                "select": "video_id,channel_handle,title",
-                "order": "video_id.asc",
-                "limit": limit,
-                "offset": offset,
-            },
+            "yt_video_features",
+            params=params,
         ) or []
-        if not videos:
+        if not feature_rows:
             return []
 
-        video_ids = [str(row["video_id"]) for row in videos if row.get("video_id")]
-        feature_rows = self.get_feature_rows(video_ids, limit=max(limit, len(video_ids)))
         channel_niches = self.get_channel_niches(
-            [str(row["channel_handle"]) for row in videos if row.get("channel_handle")],
-            limit=max(limit, len(videos)),
+            [str(row["channel_handle"]) for row in feature_rows if row.get("channel_handle")],
+            limit=max(limit, len(feature_rows)),
         )
         candidates: list[dict[str, Any]] = []
-        for video in videos:
-            video_id = str(video.get("video_id") or "")
-            feature_row = feature_rows.get(video_id)
-            if feature_row is None:
-                continue
-            channel_handle = str(video.get("channel_handle") or "")
+        for feature_row in feature_rows:
+            video_id = str(feature_row.get("video_id") or "")
+            channel_handle = str(feature_row.get("channel_handle") or "")
             candidates.append(
                 {
                     "video_id": video_id,
                     "channel_handle": channel_handle,
-                    "title": video.get("title"),
+                    "title": feature_row.get("source_title"),
                     "channel_niche": channel_niches.get(channel_handle),
                     "feature_row": feature_row,
                 }
@@ -175,6 +200,28 @@ class SupabaseRepository:
             },
         )
         return [VideoMetricSnapshot.from_row(row) for row in payload or []]
+
+    def get_latest_snapshot_rows(self, video_ids: list[str], *, limit: int = 5000) -> dict[str, dict[str, Any]]:
+        if not video_ids:
+            return {}
+
+        payload = self.client.request(
+            "GET",
+            "vw_latest_yt_video_metric_snapshots",
+            params={
+                "select": (
+                    "video_id,channel_handle,snapshot_at,published_at,title,thumbnail_url,"
+                    "view_count,like_count,comment_count"
+                ),
+                "video_id": _format_in_filter(video_ids),
+                "limit": limit,
+            },
+        )
+        return {
+            str(row["video_id"]): row
+            for row in payload or []
+            if row.get("video_id")
+        }
 
     def _upsert_rows(
         self,

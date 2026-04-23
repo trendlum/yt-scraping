@@ -20,7 +20,7 @@ from ..constants import (
     DEFAULT_TIMEOUT,
 )
 from ..exceptions import YouTubeAPIError
-from ..models import ChannelScrapeResult, utc_now
+from ..models import ChannelScrapeResult, parse_datetime, utc_now
 from ..repositories.supabase import SupabaseRepository
 from .topic_clustering import TopicClusterClient, run_topic_cluster_backfill
 
@@ -44,6 +44,17 @@ _THUMBNAIL_FIELDS = (
     "visual_style",
 )
 
+_TOPIC_CLUSTER_FIELDS = (
+    "format_type",
+    "promise_type",
+    "topic_cluster_status",
+    "topic_cluster_model",
+    "topic_cluster_input_fingerprint",
+    "topic_cluster_extracted_at",
+    "topic_cluster_error",
+    "topic_clusters",
+)
+
 _THUMBNAIL_RETRYABLE_STATUSES = {
     None,
     "",
@@ -52,6 +63,73 @@ _THUMBNAIL_RETRYABLE_STATUSES = {
     "failed",
     "decode_failed",
 }
+
+_CURRENT_VIDEO_COMPARE_FIELDS = (
+    "channel_handle",
+    "title",
+    "published_at",
+    "thumbnail_url",
+    "view_count",
+    "like_count",
+    "comment_count",
+    "duration",
+    "duration_iso8601",
+    "video_url",
+)
+
+_FEATURE_COMPARE_FIELDS = (
+    "channel_handle",
+    "extractor_version",
+    "title_fingerprint",
+    "thumbnail_fingerprint",
+    "source_title",
+    "source_thumbnail_url",
+    "title_length_chars",
+    "title_word_count",
+    "uppercase_word_count",
+    "digit_count",
+    "has_number",
+    "has_question",
+    "has_exclamation",
+    "has_year",
+    "has_vs",
+    "has_brackets",
+    "has_colon",
+    "trigger_word_count",
+    "title_pattern",
+    "thumbnail_feature_status",
+    "thumbnail_ocr_status",
+    "has_face",
+    "face_count",
+    "has_thumbnail_text",
+    "estimated_thumbnail_text_tokens",
+    "thumbnail_text",
+    "thumbnail_text_confidence",
+    "dominant_emotion",
+    "dominant_colors",
+    "composition_type",
+    "contains_chart",
+    "contains_map",
+    "visual_style",
+    "format_type",
+    "promise_type",
+    "topic_cluster_status",
+    "topic_cluster_model",
+    "topic_cluster_input_fingerprint",
+    "topic_cluster_extracted_at",
+    "topic_cluster_error",
+    "topic_clusters",
+)
+
+_SNAPSHOT_COMPARE_FIELDS = (
+    "channel_handle",
+    "published_at",
+    "title",
+    "thumbnail_url",
+    "view_count",
+    "like_count",
+    "comment_count",
+)
 
 
 def merge_unique_video_ids(*video_id_groups: list[str]) -> list[str]:
@@ -115,6 +193,36 @@ def _resolve_feature_workers(feature_workers: int | None) -> int:
     if feature_workers is None:
         return DEFAULT_FEATURE_WORKERS
     return max(1, feature_workers)
+
+
+def _row_changed(
+    existing_row: dict[str, Any] | None,
+    new_row: dict[str, Any],
+    *,
+    fields: tuple[str, ...],
+) -> bool:
+    if existing_row is None:
+        return True
+    return any(existing_row.get(field_name) != new_row.get(field_name) for field_name in fields)
+
+
+def _snapshot_should_insert(
+    latest_row: dict[str, Any] | None,
+    new_row: dict[str, Any],
+    *,
+    observed_at: datetime,
+) -> bool:
+    if latest_row is None:
+        return True
+
+    changed = _row_changed(latest_row, new_row, fields=_SNAPSHOT_COMPARE_FIELDS)
+    if changed:
+        return True
+
+    latest_snapshot_at = parse_datetime(latest_row.get("snapshot_at"))
+    if latest_snapshot_at is None:
+        return True
+    return observed_at - latest_snapshot_at >= timedelta(hours=24)
 
 
 def _build_feature_row(
@@ -190,6 +298,13 @@ def _parallel_feature_rows(
             feature_record.thumbnail_text = None
             feature_record.thumbnail_text_confidence = None
 
+        if existing_row is not None:
+            for field_name in _TOPIC_CLUSTER_FIELDS:
+                value = existing_row.get(field_name)
+                if field_name == "topic_cluster_extracted_at":
+                    value = parse_datetime(value)
+                setattr(feature_record, field_name, value)
+
         return feature_record.to_row()
 
     if feature_workers <= 1 or len(videos) == 1:
@@ -223,6 +338,7 @@ def run_batch_scrape(
     snapshot_rows: list[dict] = []
     feature_rows: list[dict] = []
     errors: list[str] = []
+    existing_feature_rows_by_video_id: dict[str, dict[str, Any]] = {}
     feature_workers = _resolve_feature_workers(feature_workers)
     timeout = getattr(youtube_client, "timeout", DEFAULT_TIMEOUT)
     youtube_session = getattr(youtube_client, "session", None)
@@ -259,6 +375,7 @@ def run_batch_scrape(
         existing_feature_rows = repository.get_feature_rows(
             [video.video_id for video in channel_result.videos]
         )
+        existing_feature_rows_by_video_id.update(existing_feature_rows)
         feature_rows.extend(
             _parallel_feature_rows(
                 channel_result.videos,
@@ -276,15 +393,58 @@ def run_batch_scrape(
             "Batch scrape failed for all channels. Errors: " + ("; ".join(errors) or "unknown")
         )
 
-    repository.upsert_current_videos(current_rows)
-    repository.insert_snapshots(snapshot_rows)
-    repository.upsert_feature_rows(feature_rows)
+    current_video_ids = [row["video_id"] for row in current_rows]
+    existing_current_rows = repository.get_current_video_rows(current_video_ids)
+    latest_snapshot_rows = repository.get_latest_snapshot_rows([row["video_id"] for row in snapshot_rows])
+
+    dirty_current_rows = [
+        row
+        for row in current_rows
+        if _row_changed(existing_current_rows.get(str(row["video_id"])), row, fields=_CURRENT_VIDEO_COMPARE_FIELDS)
+    ]
+    snapshot_rows_to_insert = [
+        row
+        for row in snapshot_rows
+        if _snapshot_should_insert(
+            latest_snapshot_rows.get(str(row["video_id"])),
+            row,
+            observed_at=run_started_at,
+        )
+    ]
+    dirty_feature_rows = [
+        row
+        for row in feature_rows
+        if _row_changed(
+            existing_feature_rows_by_video_id.get(str(row["video_id"])),
+            row,
+            fields=_FEATURE_COMPARE_FIELDS,
+        )
+    ]
+
+    repository.upsert_current_videos(dirty_current_rows)
+    repository.insert_snapshots(snapshot_rows_to_insert)
+    repository.upsert_feature_rows(dirty_feature_rows)
+    candidate_niches_by_handle = {
+        str(config["channel_handle"]): config.get("channel_niche")
+        for config in channel_configs
+        if config.get("channel_handle")
+    }
     run_topic_cluster_backfill(
         repository,
         client=topic_cluster_client,
         executed_at=run_started_at,
         workers=topic_cluster_workers,
         page_size=topic_cluster_page_size,
+        candidates=[
+            {
+                "video_id": row["video_id"],
+                "channel_handle": row["channel_handle"],
+                "title": row.get("source_title"),
+                "channel_niche": candidate_niches_by_handle.get(str(row["channel_handle"])),
+                "feature_row": row,
+            }
+            for row in feature_rows
+        ],
     )
 
     processed_handles = [result.channel_handle for result in results]
@@ -305,9 +465,9 @@ def run_batch_scrape(
 
     LOGGER.info(
         "Stored %s current rows, %s snapshots, %s feature rows and %s performance rows",
-        len(current_rows),
-        len(snapshot_rows),
-        len(feature_rows),
+        len(dirty_current_rows),
+        len(snapshot_rows_to_insert),
+        len(dirty_feature_rows),
         len(performance_rows),
     )
     if errors:

@@ -353,14 +353,41 @@ def _topic_cluster_input_fingerprint(
     )
 
 
-def _needs_topic_clustering(candidate: dict[str, Any]) -> bool:
+def _candidate_topic_cluster_input_fingerprint(
+    candidate: dict[str, Any],
+    *,
+    prompt_fingerprint: str,
+) -> str:
     feature_row = candidate["feature_row"]
-    if feature_row.get("topic_cluster_status") == "complete":
-        has_topic_clusters = bool(feature_row.get("topic_clusters"))
-        has_format_type = bool(feature_row.get("format_type"))
-        has_promise_type = bool(feature_row.get("promise_type"))
-        if has_topic_clusters and has_format_type and has_promise_type:
-            return False
+    return _topic_cluster_input_fingerprint(
+        prompt_fingerprint=prompt_fingerprint,
+        title=str(candidate.get("title") or "").strip() or None,
+        thumbnail_text=feature_row.get("thumbnail_text"),
+        channel_niche=str(candidate.get("channel_niche") or "").strip() or None,
+    )
+
+
+def _needs_topic_clustering(candidate: dict[str, Any], *, prompt_fingerprint: str) -> bool:
+    feature_row = candidate["feature_row"]
+    fingerprint = _candidate_topic_cluster_input_fingerprint(
+        candidate,
+        prompt_fingerprint=prompt_fingerprint,
+    )
+    status = str(feature_row.get("topic_cluster_status") or "").strip().lower()
+    is_complete = (
+        status == "complete"
+        and bool(feature_row.get("topic_clusters"))
+        and bool(feature_row.get("format_type"))
+        and bool(feature_row.get("promise_type"))
+    )
+    if feature_row.get("topic_cluster_input_fingerprint") != fingerprint:
+        return True
+    if status in {"", "pending", "failed"}:
+        return True
+    if status == "complete":
+        return not is_complete
+    if status == "skipped":
+        return False
     return True
 
 
@@ -371,6 +398,7 @@ def run_topic_cluster_backfill(
     executed_at: datetime | None = None,
     workers: int = DEFAULT_TOPIC_CLUSTER_WORKERS,
     page_size: int = DEFAULT_TOPIC_CLUSTER_PAGE_SIZE,
+    candidates: list[dict[str, Any]] | None = None,
 ) -> TopicClusterRunStats:
     prompt = client.prompt if client is not None else load_topic_cluster_prompt()
     resolved_model = client.model if client is not None else os.getenv("TOPIC_CLUSTER_MODEL", "").strip() or prompt.model
@@ -386,17 +414,31 @@ def run_topic_cluster_backfill(
     processed = 0
     skipped = 0
     failed = 0
-    offset = 0
+    last_video_id: str | None = None
 
-    while True:
-        candidates = repository.list_topic_cluster_candidates(limit=page_size, offset=offset)
-        if not candidates:
-            break
-        scanned += len(candidates)
-        offset += len(candidates)
+    def iter_candidate_batches() -> Any:
+        if candidates is not None:
+            yield candidates
+            return
+        while True:
+            batch = repository.list_topic_cluster_candidates(limit=page_size, after_video_id=last_video_id)
+            if not batch:
+                break
+            yield batch
 
-        processable = [candidate for candidate in candidates if _needs_topic_clustering(candidate)]
-        skipped += len(candidates) - len(processable)
+    for candidate_batch in iter_candidate_batches():
+        if not candidate_batch:
+            continue
+        scanned += len(candidate_batch)
+
+        processable = [
+            candidate
+            for candidate in candidate_batch
+            if _needs_topic_clustering(candidate, prompt_fingerprint=prompt.prompt_fingerprint)
+        ]
+        if candidates is None:
+            last_video_id = str(candidate_batch[-1].get("video_id") or last_video_id or "")
+        skipped += len(candidate_batch) - len(processable)
         if not processable:
             continue
 
@@ -405,11 +447,9 @@ def run_topic_cluster_backfill(
 
         def classify_candidate(candidate: dict[str, Any]) -> tuple[dict[str, Any], list[str] | None, bool]:
             feature_row = dict(candidate["feature_row"])
-            fingerprint = _topic_cluster_input_fingerprint(
+            fingerprint = _candidate_topic_cluster_input_fingerprint(
+                candidate,
                 prompt_fingerprint=prompt.prompt_fingerprint,
-                title=candidate.get("title"),
-                thumbnail_text=feature_row.get("thumbnail_text"),
-                channel_niche=candidate.get("channel_niche"),
             )
             feature_row["topic_cluster_input_fingerprint"] = fingerprint
             feature_row["topic_cluster_model"] = client.model

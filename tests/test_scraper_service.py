@@ -65,12 +65,14 @@ class FakeRepository:
         self.original_feature_rows: list[dict] = []
         self.performance_rows: list[dict] = []
         self.updated_at = None
+        self.existing_current_rows: dict[str, dict] = {}
         self.existing_feature_rows: dict[str, dict] = {}
+        self.latest_snapshot_rows: dict[str, dict] = {}
         self.topic_candidates: list[dict] = []
         self.replaced_topics: dict[str, list[str]] = {}
 
     def get_active_channel_configs(self) -> list[dict]:
-        return [{"channel_handle": "@channel", "thumbnail_analysis": True}]
+        return [{"channel_handle": "@channel", "thumbnail_analysis": True, "channel_niche": "crypto"}]
 
     def get_recent_video_ids(self, channel_handle: str, *, published_after, limit: int = 200) -> list[str]:
         return ["stored-video"]
@@ -80,6 +82,20 @@ class FakeRepository:
             video_id: self.existing_feature_rows[video_id]
             for video_id in video_ids
             if video_id in self.existing_feature_rows
+        }
+
+    def get_current_video_rows(self, video_ids: list[str], *, limit: int = 5000) -> dict[str, dict]:
+        return {
+            video_id: self.existing_current_rows[video_id]
+            for video_id in video_ids
+            if video_id in self.existing_current_rows
+        }
+
+    def get_latest_snapshot_rows(self, video_ids: list[str], *, limit: int = 5000) -> dict[str, dict]:
+        return {
+            video_id: self.latest_snapshot_rows[video_id]
+            for video_id in video_ids
+            if video_id in self.latest_snapshot_rows
         }
 
     def upsert_current_videos(self, rows: list[dict]) -> None:
@@ -93,10 +109,13 @@ class FakeRepository:
             self.original_feature_rows = rows
         self.feature_rows = rows
 
-    def list_topic_cluster_candidates(self, *, limit: int = 200, offset: int = 0) -> list[dict]:
+    def list_topic_cluster_candidates(self, *, limit: int = 200, after_video_id: str | None = None) -> list[dict]:
         if not self.topic_candidates:
             return []
-        return self.topic_candidates[offset:offset + limit]
+        rows = self.topic_candidates
+        if after_video_id is not None:
+            rows = [row for row in rows if str(row["video_id"]) > after_video_id]
+        return rows[:limit]
 
     def replace_video_topics(self, topics_by_video_id: dict[str, list[str]]) -> None:
         self.replaced_topics.update(topics_by_video_id)
@@ -375,17 +394,6 @@ def test_run_batch_scrape_runs_topic_clustering_for_all_candidate_videos() -> No
         executed_at=executed_at,
     )
 
-    repo.topic_candidates = [
-        {
-            "video_id": row["video_id"],
-            "channel_handle": row["channel_handle"],
-            "title": row["source_title"],
-            "channel_niche": "crypto",
-            "feature_row": row,
-        }
-        for row in repo.original_feature_rows
-    ]
-
     run_batch_scrape(
         FakeYouTubeClient(),
         repo,
@@ -406,11 +414,11 @@ def test_run_batch_scrape_runs_topic_clustering_for_all_candidate_videos() -> No
 
 
 def test_run_batch_scrape_skips_videos_that_already_have_topic_cluster_fields() -> None:
+    from yt_insights.services.topic_clustering import _topic_cluster_input_fingerprint, load_topic_cluster_prompt
+
     class FailingTopicClusterClient:
         @property
         def prompt(self):
-            from yt_insights.services.topic_clustering import load_topic_cluster_prompt
-
             return load_topic_cluster_prompt()
 
         @property
@@ -432,24 +440,25 @@ def test_run_batch_scrape_skips_videos_that_already_have_topic_cluster_fields() 
         executed_at=executed_at,
     )
 
-    complete_row = dict(repo.original_feature_rows[0])
-    complete_row.update(
-        {
-            "topic_cluster_status": "complete",
-            "topic_clusters": ["bitcoin etf flows"],
-            "format_type": "news_breakdown",
-            "promise_type": "news",
-        }
-    )
-    repo.topic_candidates = [
-        {
-            "video_id": complete_row["video_id"],
-            "channel_handle": complete_row["channel_handle"],
-            "title": complete_row["source_title"],
-            "channel_niche": "crypto",
-            "feature_row": complete_row,
-        }
-    ]
+    repo.existing_feature_rows = {}
+    prompt = load_topic_cluster_prompt()
+    for row in repo.original_feature_rows:
+        complete_row = dict(row)
+        complete_row.update(
+            {
+                "topic_cluster_status": "complete",
+                "topic_clusters": ["bitcoin etf flows"],
+                "format_type": "news_breakdown",
+                "promise_type": "news",
+                "topic_cluster_input_fingerprint": _topic_cluster_input_fingerprint(
+                    prompt_fingerprint=prompt.prompt_fingerprint,
+                    title=complete_row.get("source_title"),
+                    thumbnail_text=complete_row.get("thumbnail_text"),
+                    channel_niche="crypto",
+                ),
+            }
+        )
+        repo.existing_feature_rows[complete_row["video_id"]] = complete_row
 
     run_batch_scrape(
         FakeYouTubeClient(),
@@ -463,3 +472,95 @@ def test_run_batch_scrape_skips_videos_that_already_have_topic_cluster_fields() 
     )
 
     assert repo.replaced_topics == {}
+
+
+def test_run_batch_scrape_skips_unchanged_snapshots_within_24_hours() -> None:
+    repo = FakeRepository()
+    repo.latest_snapshot_rows = {
+        "new-video": {
+            "video_id": "new-video",
+            "channel_handle": "@channel",
+            "snapshot_at": "2026-04-12T18:00:00+00:00",
+            "published_at": "2026-04-10T00:00:00+00:00",
+            "title": "Title new-video",
+            "thumbnail_url": None,
+            "view_count": 100,
+            "like_count": 10,
+            "comment_count": 1,
+        },
+        "stored-video": {
+            "video_id": "stored-video",
+            "channel_handle": "@channel",
+            "snapshot_at": "2026-04-11T00:00:00+00:00",
+            "published_at": "2026-04-10T00:00:00+00:00",
+            "title": "Title stored-video",
+            "thumbnail_url": None,
+            "view_count": 100,
+            "like_count": 10,
+            "comment_count": 1,
+        },
+    }
+
+    run_batch_scrape(
+        FakeYouTubeClient(),
+        repo,
+        limit=10,
+        monitor_days=30,
+        baseline_window_days=30,
+        feature_workers=1,
+        executed_at=datetime(2026, 4, 13, tzinfo=timezone.utc),
+    )
+
+    assert [row["video_id"] for row in repo.snapshot_rows] == ["stored-video"]
+
+
+def test_run_batch_scrape_skips_unchanged_current_and_feature_upserts() -> None:
+    initial_repo = FakeRepository()
+    executed_at = datetime(2026, 4, 13, tzinfo=timezone.utc)
+    run_batch_scrape(
+        FakeYouTubeClient(),
+        initial_repo,
+        limit=10,
+        monitor_days=30,
+        baseline_window_days=30,
+        feature_workers=1,
+        executed_at=executed_at,
+    )
+
+    repo = FakeRepository()
+    repo.existing_current_rows = {
+        row["video_id"]: {
+            key: row[key]
+            for key in (
+                "video_id",
+                "channel_handle",
+                "title",
+                "published_at",
+                "thumbnail_url",
+                "view_count",
+                "like_count",
+                "comment_count",
+                "duration",
+                "duration_iso8601",
+                "video_url",
+            )
+        }
+        for row in initial_repo.current_rows
+    }
+    repo.existing_feature_rows = {
+        row["video_id"]: dict(row)
+        for row in initial_repo.original_feature_rows
+    }
+
+    run_batch_scrape(
+        FakeYouTubeClient(),
+        repo,
+        limit=10,
+        monitor_days=30,
+        baseline_window_days=30,
+        feature_workers=1,
+        executed_at=executed_at,
+    )
+
+    assert repo.current_rows == []
+    assert repo.original_feature_rows == []

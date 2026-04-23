@@ -364,6 +364,7 @@ class VideoFeatureRecord:
     topic_cluster_input_fingerprint: str | None = None
     topic_cluster_extracted_at: datetime | None = None
     topic_cluster_error: str | None = None
+    topic_clusters: list[str] | None = None
 
     def to_row(self) -> dict[str, Any]:
         return {
@@ -409,5 +410,6 @@ class VideoFeatureRecord:
             "topic_cluster_input_fingerprint": self.topic_cluster_input_fingerprint,
             "topic_cluster_extracted_at": serialize_datetime(self.topic_cluster_extracted_at),
             "topic_cluster_error": self.topic_cluster_error,
+            "topic_clusters": self.topic_clusters,
             "updated_at": serialize_datetime(self.extracted_at),
         }

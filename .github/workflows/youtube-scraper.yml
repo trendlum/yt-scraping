@@ -112,20 +112,38 @@ jobs:
 
           refresh_rpc() {
             local fn="$1"
-            echo "Refreshing ${fn}"
+            local payload="${2:-{}}"
+            echo "Refreshing ${fn} with payload ${payload}"
             curl --fail-with-body -sS -X POST \
               "${SUPABASE_URL}/rest/v1/rpc/${fn}" \
               -H "apikey: ${SUPABASE_SERVICE_ROLE_KEY}" \
               -H "Authorization: Bearer ${SUPABASE_SERVICE_ROLE_KEY}" \
               -H "Content-Type: application/json" \
-              -d '{}' >/dev/null
+              -d "${payload}" >/dev/null
           }
 
-          refresh_rpc refresh_all_yt_niche_growth_analysis
-          refresh_rpc refresh_all_yt_channel_growth_analysis
+          refresh_rpc refresh_yt_niche_growth_analysis '{"p_window_days":30}'
+          refresh_rpc refresh_yt_channel_growth_analysis '{"p_window_days":30}'
           refresh_rpc refresh_all_yt_underpackaged_video_analysis
           refresh_rpc refresh_all_yt_overpackaged_video_analysis
-          refresh_rpc refresh_all_yt_topic_performance_analysis
+          refresh_rpc refresh_yt_topic_performance_analysis '{"p_window_days":30}'
+
+          if [ "${GITHUB_EVENT_NAME}" = "workflow_dispatch" ]; then
+            EXTRA_WINDOWS=(60 90)
+          else
+            CURRENT_HOUR="$(date -u +%H)"
+            if [ "${CURRENT_HOUR}" = "00" ]; then
+              EXTRA_WINDOWS=(60 90)
+            else
+              EXTRA_WINDOWS=()
+            fi
+          fi
+
+          for WINDOW in "${EXTRA_WINDOWS[@]}"; do
+            refresh_rpc refresh_yt_niche_growth_analysis "{\"p_window_days\":${WINDOW}}"
+            refresh_rpc refresh_yt_channel_growth_analysis "{\"p_window_days\":${WINDOW}}"
+            refresh_rpc refresh_yt_topic_performance_analysis "{\"p_window_days\":${WINDOW}}"
+          done
 
       - name: Upload latest run artifact
         if: always()
