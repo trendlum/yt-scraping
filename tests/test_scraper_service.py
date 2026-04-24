@@ -9,7 +9,14 @@ from yt_insights.services.scraper import merge_unique_video_ids, run_batch_scrap
 
 
 class FakeYouTubeClient:
+    def __init__(self, missing_handles: set[str] | None = None) -> None:
+        self.missing_handles = missing_handles or set()
+
     def get_channel_by_handle(self, channel_handle: str) -> dict:
+        if channel_handle in self.missing_handles:
+            from yt_insights.exceptions import YouTubeAPIError
+
+            raise YouTubeAPIError(f"Channel not found for handle: {channel_handle}")
         return {
             "id": "channel-id",
             "snippet": {"title": "Channel"},
@@ -209,6 +216,31 @@ def test_run_batch_scrape_persists_current_rows_snapshots_and_features() -> None
     assert all(row["thumbnail_feature_status"] == "no_thumbnail" for row in repo.original_feature_rows)
     assert all(row["thumbnail_ocr_status"] == "no_thumbnail" for row in repo.original_feature_rows)
     assert repo.updated_at == datetime(2026, 4, 13, tzinfo=timezone.utc)
+
+
+def test_run_batch_scrape_skips_missing_channels_with_warning(caplog) -> None:
+    class TwoChannelRepository(FakeRepository):
+        def get_active_channel_configs(self) -> list[dict]:
+            return [
+                {"channel_handle": "@missing", "thumbnail_analysis": True},
+                {"channel_handle": "@channel", "thumbnail_analysis": True},
+            ]
+
+    repo = TwoChannelRepository()
+
+    with caplog.at_level("WARNING"):
+        result = run_batch_scrape(
+            FakeYouTubeClient(missing_handles={"@missing"}),
+            repo,
+            limit=10,
+            monitor_days=30,
+            baseline_window_days=30,
+            feature_workers=1,
+            executed_at=datetime(2026, 4, 13, tzinfo=timezone.utc),
+        )
+
+    assert len(result) == 1
+    assert any("Skipping missing channel @missing" in record.message for record in caplog.records)
 
 
 def test_run_batch_scrape_skips_thumbnail_analysis_when_disabled() -> None:

@@ -57,7 +57,13 @@ class SupabaseClient:
         except requests.Timeout as exc:
             raise SupabaseAPIError(f"Timeout while calling Supabase path {path}") from exc
         except requests.HTTPError as exc:
-            detail = exc.response.text if exc.response is not None else str(exc)
+            if exc.response is not None:
+                body = exc.response.text.strip()
+                if not body:
+                    body = exc.response.reason or "<empty body>"
+                detail = f"status={exc.response.status_code}, body={body}"
+            else:
+                detail = str(exc)
             raise SupabaseAPIError(f"HTTP error while calling Supabase path {path}: {detail}") from exc
         except requests.RequestException as exc:
             raise SupabaseAPIError(f"Request failed while calling Supabase path {path}: {exc}") from exc

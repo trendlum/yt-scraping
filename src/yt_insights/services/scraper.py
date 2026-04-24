@@ -26,6 +26,7 @@ from .topic_clustering import TopicClusterClient, run_topic_cluster_backfill
 
 
 LOGGER = logging.getLogger(__name__)
+_CHANNEL_NOT_FOUND_PREFIX = "Channel not found for handle: "
 
 _THUMBNAIL_FIELDS = (
     "thumbnail_feature_status",
@@ -363,8 +364,11 @@ def run_batch_scrape(
                 monitor_cutoff=monitor_cutoff,
             )
         except YouTubeAPIError as exc:
-            LOGGER.exception("Failed to scrape channel %s", handle)
-            errors.append(f"{handle}: {exc}")
+            if str(exc).startswith(_CHANNEL_NOT_FOUND_PREFIX):
+                LOGGER.warning("Skipping missing channel %s", handle)
+            else:
+                LOGGER.exception("Failed to scrape channel %s", handle)
+                errors.append(f"{handle}: {exc}")
             continue
 
         results.append(channel_result)

@@ -5,6 +5,7 @@ from typing import Any
 
 from ..clients.supabase import SupabaseClient
 from ..constants import SCRAPER_STATE_NAME
+from ..exceptions import SupabaseAPIError
 from ..models import VideoMetricSnapshot, parse_datetime, serialize_datetime
 
 
@@ -233,13 +234,27 @@ class SupabaseRepository:
         if not rows:
             return
 
-        self.client.request(
-            "POST",
-            table_name,
-            params={"on_conflict": on_conflict},
-            json_body=rows,
-            extra_headers={"Prefer": "resolution=merge-duplicates,return=minimal"},
-        )
+        try:
+            self.client.request(
+                "POST",
+                table_name,
+                params={"on_conflict": on_conflict},
+                json_body=rows,
+                extra_headers={"Prefer": "resolution=merge-duplicates,return=minimal"},
+            )
+        except SupabaseAPIError as exc:
+            row_count = len(rows)
+            sample_ids = [
+                str(row.get("video_id"))
+                for row in rows[:5]
+                if row.get("video_id") is not None
+            ]
+            detail = f"{row_count} rows"
+            if sample_ids:
+                detail += f", sample video_ids={sample_ids}"
+            raise SupabaseAPIError(
+                f"Failed to upsert into {table_name}: {detail}: {exc}"
+            ) from exc
 
     def upsert_current_videos(self, rows: list[dict[str, Any]]) -> None:
         self._upsert_rows("yt_videos", rows, on_conflict="video_id")
