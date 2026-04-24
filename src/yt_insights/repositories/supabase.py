@@ -8,15 +8,64 @@ from ..constants import SCRAPER_STATE_NAME
 from ..exceptions import SupabaseAPIError
 from ..models import VideoMetricSnapshot, parse_datetime, serialize_datetime
 
+_IN_FILTER_BATCH_SIZE = 50
+
 
 def _format_in_filter(values: list[str]) -> str:
     quoted = ",".join(f'"{value}"' for value in values)
     return f"in.({quoted})"
 
 
+def _dedupe_preserve_order(values: list[str]) -> list[str]:
+    ordered: list[str] = []
+    seen: set[str] = set()
+    for value in values:
+        if value in seen:
+            continue
+        seen.add(value)
+        ordered.append(value)
+    return ordered
+
+
+def _chunked(values: list[str], size: int) -> list[list[str]]:
+    if size <= 0:
+        raise ValueError("chunk size must be positive")
+    return [values[index : index + size] for index in range(0, len(values), size)]
+
+
 class SupabaseRepository:
     def __init__(self, client: SupabaseClient) -> None:
         self.client = client
+
+    def _fetch_rows_in_chunks(
+        self,
+        table_name: str,
+        filter_field: str,
+        values: list[str],
+        *,
+        select: str,
+        limit: int = 5000,
+        order: str | None = None,
+    ) -> list[dict[str, Any]]:
+        if not values:
+            return []
+
+        rows: list[dict[str, Any]] = []
+        for chunk in _chunked(_dedupe_preserve_order(values), _IN_FILTER_BATCH_SIZE):
+            params: dict[str, Any] = {
+                "select": select,
+                filter_field: _format_in_filter(chunk),
+                "limit": limit,
+            }
+            if order is not None:
+                params["order"] = order
+            payload = self.client.request(
+                "GET",
+                table_name,
+                params=params,
+            ) or []
+            rows.extend(payload)
+        return rows
 
     def get_active_channel_configs(self) -> list[dict[str, Any]]:
         payload = self.client.request(
@@ -76,62 +125,47 @@ class SupabaseRepository:
         return [row["video_id"] for row in payload or [] if row.get("video_id")]
 
     def get_current_video_rows(self, video_ids: list[str], *, limit: int = 5000) -> dict[str, dict[str, Any]]:
-        if not video_ids:
-            return {}
-
-        payload = self.client.request(
-            "GET",
+        payload = self._fetch_rows_in_chunks(
             "yt_videos",
-            params={
-                "select": (
-                    "video_id,channel_handle,title,published_at,thumbnail_url,"
-                    "view_count,like_count,comment_count,duration,duration_iso8601,video_url"
-                ),
-                "video_id": _format_in_filter(video_ids),
-                "limit": limit,
-            },
+            "video_id",
+            video_ids,
+            select=(
+                "video_id,channel_handle,title,published_at,thumbnail_url,"
+                "view_count,like_count,comment_count,duration,duration_iso8601,video_url"
+            ),
+            limit=limit,
         )
         return {
             str(row["video_id"]): row
-            for row in payload or []
+            for row in payload
             if row.get("video_id")
         }
 
     def get_feature_rows(self, video_ids: list[str], *, limit: int = 5000) -> dict[str, dict[str, Any]]:
-        if not video_ids:
-            return {}
-
-        payload = self.client.request(
-            "GET",
+        payload = self._fetch_rows_in_chunks(
             "yt_video_features",
-            params={
-                "select": "*",
-                "video_id": _format_in_filter(video_ids),
-                "limit": limit,
-            },
+            "video_id",
+            video_ids,
+            select="*",
+            limit=limit,
         )
         return {
             str(row["video_id"]): row
-            for row in payload or []
+            for row in payload
             if row.get("video_id")
         }
 
     def get_channel_niches(self, channel_handles: list[str], *, limit: int = 5000) -> dict[str, str | None]:
-        if not channel_handles:
-            return {}
-
-        payload = self.client.request(
-            "GET",
+        payload = self._fetch_rows_in_chunks(
             "yt_channels",
-            params={
-                "select": "channel_handle,channel_niche",
-                "channel_handle": _format_in_filter(channel_handles),
-                "limit": limit,
-            },
+            "channel_handle",
+            channel_handles,
+            select="channel_handle,channel_niche",
+            limit=limit,
         )
         return {
             str(row["channel_handle"]): row.get("channel_niche")
-            for row in payload or []
+            for row in payload
             if row.get("channel_handle")
         }
 
@@ -183,44 +217,39 @@ class SupabaseRepository:
         published_after: datetime,
         limit: int = 5000,
     ) -> list[VideoMetricSnapshot]:
-        if not channel_handles:
-            return []
-
-        payload = self.client.request(
-            "GET",
-            "yt_video_metric_snapshots",
-            params={
-                "select": (
-                    "video_id,channel_handle,snapshot_at,published_at,"
-                    "view_count,like_count,comment_count"
-                ),
-                "channel_handle": _format_in_filter(channel_handles),
-                "published_at": f"gte.{serialize_datetime(published_after)}",
-                "order": "snapshot_at.asc",
-                "limit": limit,
-            },
-        )
+        payload: list[dict[str, Any]] = []
+        for chunk in _chunked(_dedupe_preserve_order(channel_handles), _IN_FILTER_BATCH_SIZE):
+            chunk_payload = self.client.request(
+                "GET",
+                "yt_video_metric_snapshots",
+                params={
+                    "select": (
+                        "video_id,channel_handle,snapshot_at,published_at,"
+                        "view_count,like_count,comment_count"
+                    ),
+                    "channel_handle": _format_in_filter(chunk),
+                    "published_at": f"gte.{serialize_datetime(published_after)}",
+                    "order": "snapshot_at.asc",
+                    "limit": limit,
+                },
+            ) or []
+            payload.extend(chunk_payload)
         return [VideoMetricSnapshot.from_row(row) for row in payload or []]
 
     def get_latest_snapshot_rows(self, video_ids: list[str], *, limit: int = 5000) -> dict[str, dict[str, Any]]:
-        if not video_ids:
-            return {}
-
-        payload = self.client.request(
-            "GET",
+        payload = self._fetch_rows_in_chunks(
             "vw_latest_yt_video_metric_snapshots",
-            params={
-                "select": (
-                    "video_id,channel_handle,snapshot_at,published_at,title,thumbnail_url,"
-                    "view_count,like_count,comment_count"
-                ),
-                "video_id": _format_in_filter(video_ids),
-                "limit": limit,
-            },
+            "video_id",
+            video_ids,
+            select=(
+                "video_id,channel_handle,snapshot_at,published_at,title,thumbnail_url,"
+                "view_count,like_count,comment_count"
+            ),
+            limit=limit,
         )
         return {
             str(row["video_id"]): row
-            for row in payload or []
+            for row in payload
             if row.get("video_id")
         }
 
@@ -272,11 +301,12 @@ class SupabaseRepository:
         if not topics_by_video_id:
             return
 
-        self.client.request(
-            "DELETE",
-            "yt_video_topics",
-            params={"video_id": _format_in_filter(list(topics_by_video_id.keys()))},
-        )
+        for chunk in _chunked(_dedupe_preserve_order(list(topics_by_video_id.keys())), _IN_FILTER_BATCH_SIZE):
+            self.client.request(
+                "DELETE",
+                "yt_video_topics",
+                params={"video_id": _format_in_filter(chunk)},
+            )
         rows = [
             {"video_id": video_id, "topic_cluster": topic_cluster}
             for video_id, topic_clusters in topics_by_video_id.items()
@@ -286,18 +316,13 @@ class SupabaseRepository:
             self._upsert_rows("yt_video_topics", rows, on_conflict="video_id,topic_cluster")
 
     def get_topic_cluster_debug_inputs(self, video_ids: list[str], *, limit: int = 5000) -> list[dict[str, Any]]:
-        if not video_ids:
-            return []
-
-        videos_payload = self.client.request(
-            "GET",
+        videos_payload = self._fetch_rows_in_chunks(
             "yt_videos",
-            params={
-                "select": "video_id,channel_handle,title",
-                "video_id": _format_in_filter(video_ids),
-                "limit": limit,
-            },
-        ) or []
+            "video_id",
+            video_ids,
+            select="video_id,channel_handle,title",
+            limit=limit,
+        )
         if not videos_payload:
             return []
 
