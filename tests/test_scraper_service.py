@@ -3,6 +3,8 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from pathlib import Path
 
+import pytest
+
 from yt_insights.analytics.thumbnail_features import ThumbnailImageFeatures
 from yt_insights.models import VideoMetricSnapshot, VideoRecord
 from yt_insights.services.scraper import merge_unique_video_ids, run_batch_scrape
@@ -171,6 +173,14 @@ class CountingThumbnailExtractor:
             contains_map=None,
             visual_style=None,
         )
+
+
+@pytest.fixture(autouse=True)
+def _disable_real_topic_clustering(monkeypatch) -> None:
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    monkeypatch.delenv("DEEPSEEK_API_KEY", raising=False)
+    monkeypatch.delenv("TOPIC_CLUSTER_MODEL", raising=False)
+    monkeypatch.delenv("TOPIC_CLUSTER_FALLBACK_MODEL", raising=False)
 
 
 def test_merge_unique_video_ids_preserves_order() -> None:
@@ -472,6 +482,7 @@ def test_run_batch_scrape_skips_videos_that_already_have_topic_cluster_fields() 
         executed_at=executed_at,
     )
 
+    repo.replaced_topics = {}
     repo.existing_feature_rows = {}
     prompt = load_topic_cluster_prompt()
     for row in repo.original_feature_rows:
